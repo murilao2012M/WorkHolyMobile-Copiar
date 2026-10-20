@@ -4,6 +4,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'perfil_praticante_page.dart';
+import 'aparencia/workholy_aparencia.dart';
+import 'aparencia/aparencia_page.dart';
+import 'preferencias/preferencias_treino_page.dart';
+import 'tutorial_primeiro_acesso_page.dart';
+import 'tela_boas_vindas_page.dart';
 const Color verde = Color(0xFFB7F34A);
 const Color fundo = Color(0xFF10120F);
 const Color superficie = Color(0xFF1B1E19);
@@ -139,6 +145,7 @@ class SerieExecutada {
   final int repeticoesRealizadas;
   final double cargaKg;
   final bool concluida;
+  final int descansoSegundos;
 
   const SerieExecutada({
     required this.id,
@@ -149,6 +156,7 @@ class SerieExecutada {
     required this.repeticoesRealizadas,
     required this.cargaKg,
     required this.concluida,
+    required this.descansoSegundos,
   });
 
   SerieExecutada copiar({
@@ -165,6 +173,7 @@ class SerieExecutada {
       repeticoesRealizadas: repeticoesRealizadas ?? this.repeticoesRealizadas,
       cargaKg: cargaKg ?? this.cargaKg,
       concluida: concluida ?? this.concluida,
+      descansoSegundos: descansoSegundos,
     );
   }
 
@@ -177,6 +186,7 @@ class SerieExecutada {
     'repeticoesRealizadas': repeticoesRealizadas,
     'cargaKg': cargaKg,
     'concluida': concluida,
+    'descansoSegundos': descansoSegundos,
   };
 
   factory SerieExecutada.fromJson(Map<String, dynamic> json) {
@@ -191,6 +201,7 @@ class SerieExecutada {
           (json['repeticoesRealizadas'] as num?)?.toInt() ?? 0,
       cargaKg: (json['cargaKg'] as num?)?.toDouble() ?? 0,
       concluida: json['concluida'] == true,
+      descansoSegundos: (json['descansoSegundos'] as num?)?.toInt() ?? 90,
     );
   }
 }
@@ -269,58 +280,57 @@ void main() {
   runApp(const WorkHolyApp());
 }
 
-class WorkHolyApp extends StatelessWidget {
+class WorkHolyApp extends StatefulWidget {
   const WorkHolyApp({super.key});
 
   @override
+  State<WorkHolyApp> createState() => _WorkHolyAppState();
+}
+
+class _WorkHolyAppState extends State<WorkHolyApp> {
+  late final WorkHolyAparencia aparencia;
+
+  @override
+  void initState() {
+    super.initState();
+    aparencia = WorkHolyAparencia();
+    aparencia.carregar();
+  }
+
+  @override
+  void dispose() {
+    aparencia.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'WorkHoly Mobile',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: fundo,
-        colorScheme: const ColorScheme.dark(
-          primary: verde,
-          surface: superficie,
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: fundo,
-          foregroundColor: Colors.white,
-          centerTitle: false,
-        ),
-        cardColor: superficie,
-        dividerColor: Colors.white12,
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: superficie,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Colors.white12),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: verde),
-          ),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: verde,
-            foregroundColor: Colors.black,
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
-          ),
-        ),
-        useMaterial3: true,
-      ),
-      home: const WorkHolyHome(),
+    return AnimatedBuilder(
+      animation: aparencia,
+      builder: (context, _) {
+        final modo = aparencia.modo;
+
+        return MaterialApp(
+          title: 'WorkHoly Mobile',
+          debugShowCheckedModeBanner: false,
+          theme: aparencia.criarTema(Brightness.light),
+          darkTheme: aparencia.criarTema(Brightness.dark),
+          themeMode: switch (modo) {
+            ModoAparencia.escuro => ThemeMode.dark,
+            ModoAparencia.claro => ThemeMode.light,
+            ModoAparencia.automatico => ThemeMode.system,
+          },
+          home: WorkHolyHome(aparencia: aparencia),
+        );
+      },
     );
   }
 }
 
 class WorkHolyHome extends StatefulWidget {
-  const WorkHolyHome({super.key});
+  const WorkHolyHome({super.key, required this.aparencia});
 
+  final WorkHolyAparencia aparencia;
   @override
   State<WorkHolyHome> createState() => _WorkHolyHomeState();
 }
@@ -332,31 +342,23 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
 
   static const String chaveSessoesTreino = 'workholy_sessoes_treino_v1';
 
+  static const String chaveTutorialConcluido =
+      'workholy_tutorial_primeiro_acesso_v1';
+
+  static const String chaveBoasVindasConcluida =
+    'workholy_boas_vindas_concluida_v1';
+
+  bool _verificacaoTutorialIniciada = false;
+
   List<SessaoTreino> sessoesTreino = [];
 
   int abaSelecionada = 0;
   bool carregando = true;
 
   List<Treino> treinos = [
-    Treino(nome: 'Treino A', objetivo: 'Peito e tríceps', exercicios: 5),
-    Treino(nome: 'Treino B', objetivo: 'Costas e bíceps', exercicios: 6),
-    Treino(nome: 'Treino C', objetivo: 'Pernas e ombros', exercicios: 7),
   ];
 
   List<Exercicio> exercicios = [
-    Exercicio(nome: 'Supino reto', grupo: 'Peito', series: 4, repeticoes: 10),
-    Exercicio(
-      nome: 'Agachamento livre',
-      grupo: 'Pernas',
-      series: 4,
-      repeticoes: 12,
-    ),
-    Exercicio(
-      nome: 'Remada curvada',
-      grupo: 'Costas',
-      series: 3,
-      repeticoes: 12,
-    ),
   ];
 
   List<ItemTreino> itensTreino = [];
@@ -368,6 +370,52 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
   void initState() {
     super.initState();
     carregarDados();
+  }
+
+  Future<void> verificarTutorialPrimeiroAcesso() async {
+    if (_verificacaoTutorialIniciada || !mounted) return;
+
+    _verificacaoTutorialIniciada = true;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      if (!mounted) return;
+
+      // Primeira etapa: tela de boas-vindas.
+      if (prefs.getBool(chaveBoasVindasConcluida) != true) {
+        final resultadoBoasVindas = await Navigator.of(context).push<bool>(
+          MaterialPageRoute<bool>(
+            builder: (paginaContext) => TelaBoasVindasPage(
+              onComecar: () {
+                Navigator.of(paginaContext).pop(true);
+              },
+            ),
+          ),
+        );
+
+        if (!mounted || resultadoBoasVindas != true) return;
+
+        await prefs.setBool(chaveBoasVindasConcluida, true);
+      }
+
+      if (!mounted) return;
+
+      // Segunda etapa: tutorial, caso ainda não tenha sido concluído.
+      if (prefs.getBool(chaveTutorialConcluido) == true) return;
+
+      final resultadoTutorial = await Navigator.of(context).push<bool>(
+        MaterialPageRoute<bool>(
+          builder: (_) => const TutorialPrimeiroAcessoPage(),
+        ),
+      );
+
+      if (resultadoTutorial == true) {
+        await prefs.setBool(chaveTutorialConcluido, true);
+      }
+    } catch (erro) {
+      debugPrint('Erro na apresentação inicial do WorkHoly: $erro');
+    }
   }
 
   Future<void> carregarDados() async {
@@ -444,6 +492,12 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
     } finally {
       if (mounted) {
         setState(() => carregando = false);
+
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            verificarTutorialPrimeiroAcesso();
+          }
+        });
       }
     }
   }
@@ -510,72 +564,78 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
     if (mounted) setState(() {});
   }
 
-  Future<void> iniciarSessaoTreino(String treinoId) async {
-    final indiceTreino = treinos.indexWhere((t) => t.id == treinoId);
-    if (indiceTreino < 0) return;
+Future<void> iniciarSessaoTreino(String treinoId) async {
+  final indiceTreino = treinos.indexWhere((t) => t.id == treinoId);
+  if (indiceTreino < 0) return;
 
-    final treino = treinos[indiceTreino];
-    final itens = itensTreino
-        .where((item) => item.treinoId == treinoId)
-        .toList();
+  final treino = treinos[indiceTreino];
+  final itens = itensTreino
+      .where((item) => item.treinoId == treinoId)
+      .toList();
 
-    if (itens.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Adicione exercícios ao treino antes de iniciar.'),
-        ),
-      );
-      return;
-    }
-
-    final series = <SerieExecutada>[];
-
-    for (final item in itens) {
-      final indice = exercicios.indexWhere((e) => e.id == item.exercicioId);
-      final nome = indice >= 0
-          ? exercicios[indice].nome
-          : 'Exercício indisponível';
-
-      for (var numero = 1; numero <= item.series; numero++) {
-        series.add(
-          SerieExecutada(
-            id: novoId('serie'),
-            exercicioId: item.exercicioId,
-            nomeExercicio: nome,
-            numeroSerie: numero,
-            repeticoesPlanejadas: item.repeticoes,
-            repeticoesRealizadas: item.repeticoes,
-            cargaKg: item.cargaKg,
-            concluida: false,
-          ),
-        );
-      }
-    }
-
-    final sessao = SessaoTreino(
-      id: novoId('sessao'),
-      treinoId: treino.id,
-      nomeTreino: treino.nome,
-      inicio: DateTime.now(),
-      fim: null,
-      series: series,
-    );
-
-    setState(() => sessoesTreino.add(sessao));
-    await salvarDados();
-
-    if (!mounted) return;
-
-    await Navigator.push<void>(
-      context,
-      MaterialPageRoute(
-        builder: (_) =>
-            ExecucaoTreinoPage(sessaoInicial: sessao, onSalvar: salvarSessao),
+  if (itens.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Adicione exercícios ao treino antes de iniciar.'),
       ),
     );
-
-    if (mounted) setState(() {});
+    return;
   }
+
+  final series = <SerieExecutada>[];
+
+  for (final item in itens) {
+    final indice = exercicios.indexWhere(
+      (e) => e.id == item.exercicioId,
+    );
+
+    final nome = indice >= 0
+        ? exercicios[indice].nome
+        : 'Exercício indisponível';
+
+    for (var numero = 1; numero <= item.series; numero++) {
+      series.add(
+        SerieExecutada(
+          id: novoId('serie'),
+          exercicioId: item.exercicioId,
+          nomeExercicio: nome,
+          numeroSerie: numero,
+          repeticoesPlanejadas: item.repeticoes,
+          repeticoesRealizadas: item.repeticoes,
+          cargaKg: item.cargaKg,
+          descansoSegundos: item.descansoSegundos,
+          concluida: false,
+        ),
+      );
+    }
+  }
+
+  final sessao = SessaoTreino(
+    id: novoId('sessao'),
+    treinoId: treino.id,
+    nomeTreino: treino.nome,
+    inicio: DateTime.now(),
+    fim: null,
+    series: series,
+  );
+
+  setState(() => sessoesTreino.add(sessao));
+  await salvarDados();
+
+  if (!mounted) return;
+
+  await Navigator.push<void>(
+    context,
+    MaterialPageRoute(
+      builder: (_) => ExecucaoTreinoPage(
+        sessaoInicial: sessao,
+        onSalvar: salvarSessao,
+      ),
+    ),
+  );
+
+  if (mounted) setState(() {});
+}
 
   Future<void> salvarSessao(SessaoTreino sessao) async {
     final indice = sessoesTreino.indexWhere((s) => s.id == sessao.id);
@@ -589,6 +649,57 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
     await salvarDados();
 
     if (mounted) setState(() {});
+  }
+
+    Future<void> limparHistorico() async {
+    final quantidade = sessoesTreino.where((s) => s.finalizada).length;
+
+    if (quantidade == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Não há treinos concluídos para limpar.'),
+        ),
+      );
+      return;
+    }
+
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Limpar histórico?'),
+        content: Text(
+          'Serão removidos $quantidade registro(s) de treinos concluídos. '
+          'As sessões em andamento e os treinos cadastrados serão preservados. '
+          'Esta ação não pode ser desfeita.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Limpar histórico'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar != true || !mounted) return;
+
+    setState(() {
+      sessoesTreino.removeWhere((sessao) => sessao.finalizada);
+    });
+
+    await salvarDados();
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Histórico de treinos concluídos limpo com sucesso.'),
+      ),
+    );
   }
 
   Future<void> salvarItensDoTreino(
@@ -723,6 +834,8 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
       construirPaginaTreinos(),
       construirPaginaExercicios(),
       construirPaginaHistorico(),
+      const PerfilPraticantePage(),
+      AparenciaPage(aparencia: widget.aparencia),
     ];
 
     return Scaffold(
@@ -734,6 +847,20 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
             Text('WorkHoly', style: TextStyle(fontWeight: FontWeight.bold)),
           ],
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Configurações',
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const ConfiguracoesPage(),
+                ),
+              );
+            },
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
       body: carregando
           ? const Center(child: CircularProgressIndicator(color: verde))
@@ -745,28 +872,56 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
         onDestinationSelected: (indice) {
           setState(() => abaSelecionada = indice);
         },
-        backgroundColor: superficie,
-        indicatorColor: verde.withValues(alpha: 0.18),
-        destinations: const [
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        indicatorColor: widget.aparencia.corDestaque.withValues(alpha: 0.18),
+        destinations: [
           NavigationDestination(
             icon: Icon(Icons.dashboard_outlined),
-            selectedIcon: Icon(Icons.dashboard, color: verde),
+            selectedIcon: Icon(
+              Icons.dashboard,
+              color: widget.aparencia.corDestaque,
+            ),
             label: 'Painel',
           ),
           NavigationDestination(
             icon: Icon(Icons.view_list_outlined),
-            selectedIcon: Icon(Icons.view_list, color: verde),
+            selectedIcon: Icon(
+              Icons.view_list,
+              color: widget.aparencia.corDestaque,
+            ),
             label: 'Treinos',
           ),
           NavigationDestination(
             icon: Icon(Icons.fitness_center_outlined),
-            selectedIcon: Icon(Icons.fitness_center, color: verde),
+            selectedIcon: Icon(
+              Icons.fitness_center,
+              color: widget.aparencia.corDestaque,
+            ),
             label: 'Exercícios',
           ),
           NavigationDestination(
             icon: Icon(Icons.history),
-            selectedIcon: Icon(Icons.history, color: verde),
+            selectedIcon: Icon(
+              Icons.history,
+              color: widget.aparencia.corDestaque,
+            ),
             label: 'Histórico',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline),
+            selectedIcon: Icon(
+              Icons.person,
+              color: widget.aparencia.corDestaque,
+            ),
+            label: 'Perfil',
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.palette_outlined),
+            selectedIcon: Icon(
+              Icons.palette,
+              color: widget.aparencia.corDestaque,
+            ),
+            label: 'Aparência',
           ),
         ],
       ),
@@ -774,48 +929,225 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
   }
 
   Widget construirPainel() {
+    final agora = DateTime.now();
+    final sessoesFinalizadas =
+        sessoesTreino.where((sessao) => sessao.finalizada).toList()
+          ..sort((a, b) => b.inicio.compareTo(a.inicio));
+
+    final inicioSemana = DateTime(
+      agora.year,
+      agora.month,
+      agora.day,
+    ).subtract(Duration(days: agora.weekday - 1));
+
+    final sessoesSemana = sessoesFinalizadas.where((sessao) {
+      return !sessao.inicio.isBefore(inicioSemana) &&
+          sessao.inicio.isBefore(inicioSemana.add(const Duration(days: 7)));
+    }).toList();
+
+    final duracaoTotal = sessoesFinalizadas.fold<int>(0, (total, sessao) {
+      final fim = sessao.fim!;
+      final segundos = fim.difference(sessao.inicio).inSeconds;
+      return total + (segundos > 0 ? segundos : 0);
+    });
+
+    final seriesConcluidas = sessoesFinalizadas.fold<int>(
+      0,
+      (total, sessao) => total + sessao.seriesConcluidas,
+    );
+
+    const dias = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+
+    final valoresSemana = List<int>.generate(7, (indice) {
+      final dia = inicioSemana.add(Duration(days: indice));
+      return sessoesFinalizadas.where((sessao) {
+        return sessao.inicio.year == dia.year &&
+            sessao.inicio.month == dia.month &&
+            sessao.inicio.day == dia.day;
+      }).length;
+    });
+
+    const meses = [
+      'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+      'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez',
+    ];
+
+    final valoresMeses = List<int>.generate(6, (indice) {
+      final mes = DateTime(agora.year, agora.month - 5 + indice, 1);
+      return sessoesFinalizadas.where((sessao) {
+        return sessao.inicio.year == mes.year &&
+            sessao.inicio.month == mes.month;
+      }).length;
+    });
+
+    final rotulosMeses = List<String>.generate(6, (indice) {
+      final mes = DateTime(agora.year, agora.month - 5 + indice, 1);
+      return meses[mes.month - 1];
+    });
+
+    final ultimaSessao = sessoesFinalizadas.isEmpty
+        ? null
+        : sessoesFinalizadas.first;
+
     return ListView(
       padding: const EdgeInsets.all(18),
       children: [
         const Text(
-          'Seu treinamento',
+          'Seu progresso',
           style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 6),
         const Text(
-          'Organize seus treinos e acompanhe sua rotina.',
+          'Acompanhe sua rotina e sua evolução.',
           style: TextStyle(color: textoSecundario),
         ),
         const SizedBox(height: 20),
-        Row(
+
+        GridView.count(
+          crossAxisCount: 2,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+          childAspectRatio: 1.35,
           children: [
-            Expanded(
-              child: cartaoResumo(
-                'Treinos',
-                '${treinos.length}',
-                Icons.view_list,
-              ),
+            cartaoResumo(
+              'Treinos cadastrados',
+              '${treinos.length}',
+              Icons.fitness_center,
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: cartaoResumo(
-                'Exercícios',
-                '${exercicios.length}',
-                Icons.fitness_center,
-              ),
+            cartaoResumo(
+              'Exercícios',
+              '${exercicios.length}',
+              Icons.sports_gymnastics,
+            ),
+            cartaoResumo(
+              'Sessões nesta semana',
+              '${sessoesSemana.length}',
+              Icons.calendar_month,
+            ),
+            cartaoResumo(
+              'Séries concluídas',
+              '$seriesConcluidas',
+              Icons.check_circle_outline,
             ),
           ],
         ),
+
         const SizedBox(height: 24),
+
+        _cartaoGrafico(
+          titulo: 'Treinos por dia da semana',
+          rotulos: dias,
+          valores: valoresSemana,
+        ),
+
+        const SizedBox(height: 16),
+
+        _cartaoGrafico(
+          titulo: 'Sessões nos últimos 6 meses',
+          rotulos: rotulosMeses,
+          valores: valoresMeses,
+        ),
+
+        const SizedBox(height: 16),
+
+        Card(
+          color: superficie,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Tempo total de treino',
+                  style: TextStyle(
+                    color: textoSecundario,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _formatarDuracao(duracaoTotal),
+                  style: const TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${sessoesFinalizadas.length} sessões finalizadas',
+                  style: const TextStyle(color: textoSecundario),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        Card(
+          color: superficie,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Último treino concluído',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (ultimaSessao == null)
+                  const Text(
+                    'Você ainda não concluiu uma sessão. '
+                    'Seu histórico aparecerá aqui.',
+                    style: TextStyle(color: textoSecundario),
+                  )
+                else ...[
+                  Text(
+                    ultimaSessao.nomeTreino,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${ultimaSessao.inicio.day.toString().padLeft(2, '0')}/'
+                    '${ultimaSessao.inicio.month.toString().padLeft(2, '0')}/'
+                    '${ultimaSessao.inicio.year}',
+                    style: const TextStyle(color: textoSecundario),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${ultimaSessao.seriesConcluidas} séries concluídas',
+                    style: const TextStyle(color: textoSecundario),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 24),
+
         tituloSecao('Meus treinos'),
         const SizedBox(height: 10),
+
         if (treinos.isEmpty)
           const Text(
             'Nenhum treino cadastrado. Crie seu primeiro treino.',
             style: TextStyle(color: textoSecundario),
           ),
+
         ...treinos.map((treino) => cartaoTreino(treino)),
+
         const SizedBox(height: 16),
+
         OutlinedButton.icon(
           onPressed: () => criarOuEditarTreino(),
           icon: const Icon(Icons.add),
@@ -825,6 +1157,106 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
     );
   }
 
+
+  String _formatarDuracao(int segundos) {
+    final duracao = Duration(seconds: segundos);
+    final horas = duracao.inHours;
+    final minutos = duracao.inMinutes.remainder(60);
+
+    if (horas > 0) {
+      return '$horas h $minutos min';
+    }
+
+    return '${duracao.inMinutes} min';
+  }
+
+  Widget _cartaoGrafico({
+    required String titulo,
+    required List<String> rotulos,
+    required List<int> valores,
+  }) {
+    final maximo = valores.isEmpty
+        ? 0
+        : valores.reduce((a, b) => a > b ? a : b);
+
+    return Card(
+      color: superficie,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              titulo,
+              style: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              height: 132,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: List.generate(rotulos.length, (indice) {
+                  final valor = valores[indice];
+                  final altura = maximo == 0
+                      ? 4.0
+                      : (valor / maximo * 88).clamp(4.0, 88.0).toDouble();
+
+                  return Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 3),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Text(
+                            '$valor',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: textoSecundario,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          Container(
+                            height: altura,
+                            decoration: BoxDecoration(
+                              color: verde.withValues(
+                                alpha: valor == 0 ? 0.20 : 0.90,
+                              ),
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            rotulos[indice],
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: textoSecundario,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ),
+            if (maximo == 0) ...[
+              const SizedBox(height: 8),
+              const Text(
+                'Ainda não há sessões concluídas neste período.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: textoSecundario,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
   Widget cartaoResumo(String titulo, String valor, IconData icone) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -1052,9 +1484,27 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
     return ListView(
       padding: const EdgeInsets.all(18),
       children: [
-        const Text(
-          'Histórico',
-          style: TextStyle(fontSize: 25, fontWeight: FontWeight.bold),
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Histórico',
+                style: TextStyle(
+                  fontSize: 25,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            if (sessoesTreino.any((sessao) => sessao.finalizada))
+              IconButton(
+                tooltip: 'Limpar histórico',
+                onPressed: limparHistorico,
+                icon: const Icon(
+                  Icons.delete_sweep_outlined,
+                  color: Colors.redAccent,
+                ),
+              ),
+          ],
         ),
         const SizedBox(height: 12),
         if (ordenadas.isEmpty)
@@ -1067,7 +1517,10 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
                   SizedBox(height: 12),
                   Text(
                     'Nenhuma sessão registrada',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   SizedBox(height: 8),
                   Text(
@@ -1094,12 +1547,32 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      sessao.nomeTreino,
-                      style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            sessao.nomeTreino,
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        if (sessao.finalizada &&
+                            treinos.any(
+                              (t) => t.id == sessao.treinoId,
+                            ))
+                          IconButton(
+                            tooltip: 'Refazer treino',
+                            onPressed: () {
+                              iniciarSessaoTreino(sessao.treinoId);
+                            },
+                            icon: const Icon(
+                              Icons.replay,
+                              color: verde,
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 8),
                     Text(
@@ -1115,7 +1588,7 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
                     ),
                     const SizedBox(height: 10),
                     LinearProgressIndicator(
-                      value: progresso,
+                      value: progresso.clamp(0.0, 1.0),
                       color: verde,
                       backgroundColor: Colors.white12,
                     ),
@@ -1125,6 +1598,148 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
             );
           }),
       ],
+    );
+  }
+}
+
+class ConfiguracoesPage extends StatelessWidget {
+  const ConfiguracoesPage({super.key});
+
+  void mostrarEmBreve(BuildContext context, String recurso) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$recurso estará disponível em uma próxima atualização.'),
+      ),
+    );
+  }
+
+  Future<void> abrirTutorial(BuildContext context) async {
+      final resultado = await Navigator.of(context).push<bool>(
+        MaterialPageRoute<bool>(
+          builder: (_) => const TutorialPrimeiroAcessoPage(),
+        ),
+      );
+
+      if (resultado == true) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool(
+          'workholy_tutorial_primeiro_acesso_v1',
+          true,
+        );
+      }
+    }
+
+  void mostrarSobre(BuildContext context) {
+    showAboutDialog(
+      context: context,
+      applicationName: 'WorkHoly Mobile',
+      applicationVersion: '1.0.0',
+      applicationIcon: const Icon(Icons.fitness_center, color: verde, size: 36),
+      applicationLegalese: 'Aplicativo de treinamento físico.',
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Configurações')),
+      body: ListView(
+        padding: const EdgeInsets.all(18),
+        children: [
+          const Text(
+            'Personalize sua experiência',
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Gerencie as preferências do WorkHoly Mobile.',
+            style: TextStyle(color: textoSecundario),
+          ),
+          const SizedBox(height: 24),
+
+          const Text(
+            'PREFERÊNCIAS',
+            style: TextStyle(
+              color: verde,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.2,
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.person_outline, color: verde),
+                  title: const Text('Perfil do treinador'),
+                  subtitle: const Text('Nome e informações profissionais'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => mostrarEmBreve(context, 'Perfil do treinador'),
+                ),
+                const Divider(height: 1, indent: 16, endIndent: 16),
+                ListTile(
+                  leading: const Icon(Icons.palette_outlined, color: verde),
+                  title: const Text('Aparência'),
+                  subtitle: const Text('Personalização visual'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () =>
+                      mostrarEmBreve(context, 'Personalização da aparência'),
+                ),
+                const Divider(height: 1, indent: 16, endIndent: 16),
+                ListTile(
+                  leading: const Icon(Icons.timer_outlined, color: verde),
+                  title: const Text('Preferências de treino'),
+                  subtitle: const Text('Opções de execução e descanso'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const PreferenciasTreinoPage(),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+          const Text(
+            'APLICATIVO',
+            style: TextStyle(
+              color: verde,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.2,
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.school_outlined, color: verde),
+                  title: const Text('Ver tutorial novamente'),
+                  subtitle: const Text('Revise as principais funções do aplicativo'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => abrirTutorial(context),
+                ),
+                const Divider(height: 1, indent: 16, endIndent: 16),
+                ListTile(
+                  leading: const Icon(Icons.info_outline, color: verde),
+                  title: const Text('Sobre o WorkHoly'),
+                  subtitle: const Text('Informações e versão do aplicativo'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => mostrarSobre(context),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1382,10 +1997,60 @@ class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
   late List<ItemTreino> itens;
   bool salvando = false;
 
+  static const String _chaveDescanso = 'workholy_pref_treino_descanso_v1';
+
+  int descansoPreferido = 90;
+
+  static const String chaveTutorialConcluido =
+    'workholy_tutorial_primeiro_acesso_v1';
+
+  bool _verificacaoTutorialIniciada = false;
+
   @override
   void initState() {
     super.initState();
+
     itens = List<ItemTreino>.from(widget.itensIniciais);
+
+    _carregarDescansoPreferido();
+  }
+
+  Future<void> verificarTutorialPrimeiroAcesso() async {
+    if (_verificacaoTutorialIniciada || !mounted) return;
+
+    _verificacaoTutorialIniciada = true;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      if (!mounted ||
+          prefs.getBool(chaveTutorialConcluido) == true) {
+        return;
+      }
+
+      final resultado = await Navigator.of(context).push<bool>(
+        MaterialPageRoute<bool>(
+          builder: (_) => const TutorialPrimeiroAcessoPage(),
+        ),
+      );
+
+      if (resultado == true) {
+        await prefs.setBool(chaveTutorialConcluido, true);
+      }
+    } catch (erro) {
+      debugPrint('Erro ao abrir o tutorial inicial: $erro');
+    }
+  }
+
+  Future<void> _carregarDescansoPreferido() async {
+    final prefs = await SharedPreferences.getInstance();
+    final valor = prefs.getInt(_chaveDescanso) ?? 90;
+
+    if (!mounted) return;
+
+    setState(() {
+      descansoPreferido = valor;
+    });
   }
 
   Exercicio? encontrarExercicio(String id) {
@@ -1482,7 +2147,7 @@ class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
       series: selecionado.series,
       repeticoes: selecionado.repeticoes,
       cargaKg: 0,
-      descansoSegundos: 90,
+      descansoSegundos: descansoPreferido,
     );
 
     final configurado = await abrirConfiguracao(
@@ -1979,11 +2644,11 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
   bool salvando = false;
   bool finalizando = false;
 
-  // Cronômetro de descanso: 60 segundos por padrão.
-  static const int descansoPadrao = 60;
-
   Timer? temporizador;
-  int segundosRestantes = descansoPadrao;
+
+  int descansoTotal = 60;
+  int segundosRestantes = 60;
+
   bool descansoAtivo = false;
   bool descansoPausado = false;
   @override
@@ -1992,11 +2657,24 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
     sessao = widget.sessaoInicial;
   }
 
-  void iniciarDescanso() {
+  void iniciarDescanso(int duracaoSegundos) {
     temporizador?.cancel();
 
+    final int duracao = duracaoSegundos.clamp(0, 3600).toInt();
+
+    if (duracao == 0) {
+      setState(() {
+        descansoTotal = 0;
+        segundosRestantes = 0;
+        descansoAtivo = false;
+        descansoPausado = false;
+      });
+      return;
+    }
+
     setState(() {
-      segundosRestantes = descansoPadrao;
+      descansoTotal = duracao;
+      segundosRestantes = duracao;
       descansoAtivo = true;
       descansoPausado = false;
     });
@@ -2066,7 +2744,7 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
     setState(() {
       descansoAtivo = false;
       descansoPausado = false;
-      segundosRestantes = descansoPadrao;
+      segundosRestantes = descansoTotal;
     });
   }
 
@@ -2126,6 +2804,47 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
     }
   }
 
+  Future<void> finalizarAutomaticamente() async {
+    if (finalizando || salvando || sessao.finalizada) return;
+
+    temporizador?.cancel();
+
+    final sessaoAnterior = sessao;
+    final encerrada = sessao.copiar(fim: DateTime.now());
+
+    setState(() {
+      finalizando = true;
+      sessao = encerrada;
+      descansoAtivo = false;
+      descansoPausado = false;
+    });
+
+    try {
+      await widget.onSalvar(encerrada);
+
+      if (!mounted) return;
+
+      setState(() {
+        finalizando = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Treino concluído e salvo no histórico!')),
+      );
+    } catch (erro) {
+      if (!mounted) return;
+
+      setState(() {
+        sessao = sessaoAnterior;
+        finalizando = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao concluir o treino: $erro')),
+      );
+    }
+  }
+
   Future<void> alternarSerie(SerieExecutada serie) async {
     if (salvando || finalizando || sessao.finalizada) return;
 
@@ -2135,11 +2854,20 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
 
     if (!mounted) return;
 
-    if (vaiConcluir) {
-      iniciarDescanso();
-    } else {
+    if (!vaiConcluir) {
       encerrarDescanso();
+      return;
     }
+
+    final todasConcluidas =
+        sessao.series.isNotEmpty && sessao.series.every((s) => s.concluida);
+
+    if (todasConcluidas) {
+      await finalizarAutomaticamente();
+      return;
+    }
+
+    iniciarDescanso(serie.descansoSegundos);
   }
 
   Future<void> editarSerie(SerieExecutada serie) async {
@@ -2306,7 +3034,9 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
   }
 
   Widget construirPainelDescanso() {
-    final progresso = segundosRestantes / descansoPadrao;
+    final progresso = descansoTotal == 0
+        ? 0.0
+        : segundosRestantes / descansoTotal;
 
     return Container(
       width: double.infinity,
