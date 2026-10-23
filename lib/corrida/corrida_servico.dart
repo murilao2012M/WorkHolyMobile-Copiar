@@ -37,6 +37,20 @@ class CorridaTaskHandler extends TaskHandler {
   double _distanciaNoUltimoSalvamento = 0;
 
   Future<void> _restaurar(String id) async {
+    // Evita reiniciar o cronômetro e o GPS ao restaurar
+    // novamente a sessão que já está carregada.
+    if (_id == id && (_estado == 'em_andamento' || _estado == 'pausada')) {
+      _enviarEstado(tipo: 'estado_confirmado', incluirRota: true);
+      return;
+    }
+
+    // Não permite substituir silenciosamente outra sessão ativa.
+    if (_id != null &&
+        _id != id &&
+        (_estado == 'em_andamento' || _estado == 'pausada')) {
+      throw StateError('Já existe outra corrida carregada neste serviço.');
+    }
+
     final registro = await CorridaBanco.instancia.buscar(id);
     if (registro == null) return;
 
@@ -77,7 +91,7 @@ class CorridaTaskHandler extends TaskHandler {
       _duracaoSegundos = ((_tempoAcumuladoMs + agora - _inicioTrechoMs!) / 1000)
           .floor();
 
-      unawaited(_salvarSeNecessario());
+      _salvarEmSegundoPlano();
       FlutterForegroundTask.updateService(
         notificationTitle: 'WorkHoly — Corrida em andamento',
         notificationText:
@@ -125,6 +139,16 @@ class CorridaTaskHandler extends TaskHandler {
       'tipo': 'erro',
       'mensagem': mensagem,
     });
+  }
+
+  void _salvarEmSegundoPlano() {
+    unawaited(
+      _salvarSeNecessario().catchError((Object erro, StackTrace stack) {
+        // _enfileirarPersistencia já comunica a falha
+        // pelo canal de erros do serviço.
+        // Aqui impedimos que a Future fique sem tratamento.
+      }),
+    );
   }
 
   Future<void> _salvarSeNecessario({bool forcar = false}) {
@@ -257,7 +281,7 @@ class CorridaTaskHandler extends TaskHandler {
             };
 
             _rota.add(pontoDaRota);
-            unawaited(_salvarSeNecessario());
+            _salvarEmSegundoPlano();
             _enviarEstado(novoPonto: pontoDaRota);
           },
           onError: (Object erro) {
@@ -382,15 +406,23 @@ class CorridaTaskHandler extends TaskHandler {
   }
 
   Future<void> _finalizar() async {
+    // Um segundo comando não deve alterar a data de término.
+    if (_estado == 'finalizada') return;
+
+    if (_id == null) return;
+
     if (_estado == 'em_andamento') {
       await _pausar(confirmar: false);
     }
 
-    if (_id == null) return;
+    // A pausa pode ter falhado; só finalize se houver uma sessão válida.
+    if (_id == null || _estado != 'pausada') return;
 
     _estado = 'finalizada';
     _mensagemGps = 'Corrida finalizada.';
+
     await _enfileirarPersistencia(finalizar: true);
+
     _enviarEstado(tipo: 'finalizada', incluirRota: true);
 
     await FlutterForegroundTask.stopService();

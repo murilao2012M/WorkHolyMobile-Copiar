@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -16,11 +15,12 @@ void main() {
   });
 
   setUp(() async {
-    diretorioTemporario =
-        await Directory.systemTemp.createTemp('workholy_corrida_test_');
+    diretorioTemporario = await Directory.systemTemp.createTemp(
+      'workholy_corrida_test_',
+    );
 
     banco = CorridaBanco.paraTestes(
-      caminhoBanco: p.join(diretorioTemporario.path, 'teste.db'),
+      caminho: p.join(diretorioTemporario.path, 'teste.db'),
     );
   });
 
@@ -46,7 +46,7 @@ void main() {
     expect(registro['fim_ms'], isNull);
   });
 
-  test('atualiza duração, distância, estado e rota', () async {
+  test('atualiza duraÃ§Ã£o, distÃ¢ncia, estado e rota', () async {
     await banco.criar('corrida-2', 1000);
 
     final rota = <Map<String, double>>[
@@ -75,7 +75,7 @@ void main() {
     expect(rotaSalva.first['lon'], -45.88);
   });
 
-  test('finalização registra fim_ms', () async {
+  test('finalizaÃ§Ã£o registra fim_ms', () async {
     await banco.criar('corrida-3', 1000);
 
     const fimMs = 5000;
@@ -95,7 +95,7 @@ void main() {
     expect(registro['fim_ms'], fimMs);
   });
 
-  test('atualização sem fimMs preserva a data de finalização', () async {
+  test('atualizaÃ§Ã£o sem fimMs preserva a data de finalizaÃ§Ã£o', () async {
     await banco.criar('corrida-4', 1000);
 
     await banco.atualizar(
@@ -122,7 +122,7 @@ void main() {
     expect((registro['distancia_metros'] as num).toDouble(), 510);
   });
 
-  test('lista somente corridas finalizadas no histórico concluído', () async {
+  test('lista somente corridas finalizadas no histÃ³rico concluÃ­do', () async {
     await banco.criar('corrida-aberta', 1000);
     await banco.criar('corrida-finalizada', 2000);
 

@@ -44,8 +44,7 @@ class CorridaBanco {
   CorridaBanco._() : _caminhoBanco = null;
 
   /// Construtor exclusivo para testes com banco separado.
-  CorridaBanco.paraTestes({required String caminhoBanco})
-      : _caminhoBanco = caminhoBanco;
+  CorridaBanco.paraTestes({required String caminho}) : _caminhoBanco = caminho;
 
   static final CorridaBanco instancia = CorridaBanco._();
 
@@ -55,11 +54,9 @@ class CorridaBanco {
   Future<Database> get database async {
     if (_db != null) return _db!;
 
-    final caminho = _caminhoBanco ??
-        p.join(
-          await getDatabasesPath(),
-          'workholy_corridas.db',
-        );
+    final caminho =
+        _caminhoBanco ??
+        p.join(await getDatabasesPath(), 'workholy_corridas.db');
 
     _db = await openDatabase(
       caminho,
@@ -214,7 +211,8 @@ class CorridaBanco {
       return [];
     }
   }
-/// Fecha a conexão aberta, principalmente para limpeza dos testes.
+
+  /// Fecha a conexão aberta, principalmente para limpeza dos testes.
   Future<void> fechar() async {
     final db = _db;
     _db = null;
