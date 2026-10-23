@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+
+import '../dados/workholy_banco.dart';
 
 class PreferenciasTreinoPage extends StatefulWidget {
   const PreferenciasTreinoPage({super.key});
@@ -31,16 +32,21 @@ class _PreferenciasTreinoPageState extends State<PreferenciasTreinoPage> {
   }
 
   Future<void> _carregarPreferencias() async {
-    final prefs = await SharedPreferences.getInstance();
+    final banco = WorkHolyBanco.instancia;
+    final objetivo = await banco.lerTexto(_chaveObjetivo);
+    final nivel = await banco.lerTexto(_chaveNivel);
+    final dias = await banco.lerInteiro(_chaveDias);
+    final duracao = await banco.lerInteiro(_chaveDuracao);
+    final descanso = await banco.lerInteiro(_chaveDescanso);
 
     if (!mounted) return;
 
     setState(() {
-      _objetivo = prefs.getString(_chaveObjetivo) ?? 'Hipertrofia';
-      _nivel = prefs.getString(_chaveNivel) ?? 'Intermediário';
-      _dias = prefs.getInt(_chaveDias) ?? 4;
-      _duracao = prefs.getInt(_chaveDuracao) ?? 60;
-      _descanso = prefs.getInt(_chaveDescanso) ?? 90;
+      _objetivo = objetivo ?? 'Hipertrofia';
+      _nivel = nivel ?? 'Intermediário';
+      _dias = dias ?? 4;
+      _duracao = duracao ?? 60;
+      _descanso = descanso ?? 90;
       _carregando = false;
     });
   }
@@ -51,13 +57,13 @@ class _PreferenciasTreinoPageState extends State<PreferenciasTreinoPage> {
     setState(() => _salvando = true);
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-
-      await prefs.setString(_chaveObjetivo, _objetivo);
-      await prefs.setString(_chaveNivel, _nivel);
-      await prefs.setInt(_chaveDias, _dias);
-      await prefs.setInt(_chaveDuracao, _duracao);
-      await prefs.setInt(_chaveDescanso, _descanso);
+      await WorkHolyBanco.instancia.salvarConfiguracoes({
+        _chaveObjetivo: _objetivo,
+        _chaveNivel: _nivel,
+        _chaveDias: _dias,
+        _chaveDuracao: _duracao,
+        _chaveDescanso: _descanso,
+      });
 
       if (!mounted) return;
 

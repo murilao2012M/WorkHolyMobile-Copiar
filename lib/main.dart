@@ -1,15 +1,27 @@
-import 'dart:convert';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
+import 'dados/workholy_banco.dart';
 import 'perfil_praticante_page.dart';
 import 'aparencia/workholy_aparencia.dart';
 import 'aparencia/aparencia_page.dart';
 import 'preferencias/preferencias_treino_page.dart';
 import 'tutorial_primeiro_acesso_page.dart';
+import 'exercicios/biblioteca_exercicios.dart';
+import 'corrida/corrida_banco.dart';
+import 'corrida/corrida_page.dart';
+import 'assinatura/assinatura_workholy.dart';
+import 'assinatura/plano_premium_page.dart';
+
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+
 import 'tela_boas_vindas_page.dart';
+import 'firebase_options.dart';
+import 'autenticacao/autenticacao_page.dart';
+
 const Color verde = Color(0xFFB7F34A);
 const Color fundo = Color(0xFF10120F);
 const Color superficie = Color(0xFF1B1E19);
@@ -271,12 +283,71 @@ class SessaoTreino {
   }
 }
 
+enum _TipoAtividadePainel { musculacao, corrida }
+
+/// Representa uma atividade finalizada que deve aparecer consolidada no
+/// painel. A corrida continua no próprio banco e histórico, mas participa dos
+/// indicadores sem ser duplicada como uma sessão de musculação.
+class _AtividadePainel {
+  const _AtividadePainel({
+    required this.tipo,
+    required this.inicio,
+    required this.duracaoSegundos,
+    required this.titulo,
+    this.seriesConcluidas = 0,
+    this.distanciaMetros,
+  });
+
+  final _TipoAtividadePainel tipo;
+  final DateTime inicio;
+  final int duracaoSegundos;
+  final String titulo;
+  final int seriesConcluidas;
+  final double? distanciaMetros;
+}
+
+class _DestinoNavegacao {
+  const _DestinoNavegacao({
+    required this.rotulo,
+    required this.icone,
+    required this.iconeSelecionado,
+  });
+
+  final String rotulo;
+  final IconData icone;
+  final IconData iconeSelecionado;
+}
+
 // ============================================================
 // APLICATIVO
 // ============================================================
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  FlutterForegroundTask.initCommunicationPort();
+
+  FlutterForegroundTask.init(
+    androidNotificationOptions: AndroidNotificationOptions(
+      channelId: 'workholy_corrida',
+      channelName: 'Corrida WorkHoly',
+      channelDescription:
+          'Notificação exibida enquanto o GPS da corrida está ativo.',
+      onlyAlertOnce: true,
+    ),
+    iosNotificationOptions: const IOSNotificationOptions(
+      showNotification: false,
+      playSound: false,
+    ),
+    foregroundTaskOptions: ForegroundTaskOptions(
+      eventAction: ForegroundTaskEventAction.repeat(1000),
+      allowWakeLock: true,
+      allowWifiLock: false,
+    ),
+  );
+
   runApp(const WorkHolyApp());
 }
 
@@ -320,7 +391,26 @@ class _WorkHolyAppState extends State<WorkHolyApp> {
             ModoAparencia.claro => ThemeMode.light,
             ModoAparencia.automatico => ThemeMode.system,
           },
-          home: WorkHolyHome(aparencia: aparencia),
+          home: StreamBuilder<User?>(
+            stream: FirebaseAuth.instance.userChanges(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Scaffold(
+                  body: Center(child: CircularProgressIndicator()),
+                );
+              }
+              final usuario = snapshot.data;
+              debugPrint("Diagnóstico de Autenticação");
+              debugPrint('Estado do stream: ${snapshot.connectionState}');
+              debugPrint('Existe usuário: ${usuario != null}');
+              debugPrint('Email verificado: ${usuario?.emailVerified}');
+              debugPrint('Email: ${usuario?.email ?? "(nenhum)"}');
+
+              if (usuario == null) return const AutenticacaoPage();
+              if (!usuario.emailVerified) return const ConfirmarEmailPage();
+              return WorkHolyHome(aparencia: aparencia);
+            },
+          ),
         );
       },
     );
@@ -336,32 +426,32 @@ class WorkHolyHome extends StatefulWidget {
 }
 
 class _WorkHolyHomeState extends State<WorkHolyHome> {
-  static const String chaveTreinos = 'workholy_treinos_v1';
-  static const String chaveExercicios = 'workholy_exercicios_v1';
-  static const String chaveItensTreino = 'workholy_itens_treino_v1';
-
-  static const String chaveSessoesTreino = 'workholy_sessoes_treino_v1';
-
   static const String chaveTutorialConcluido =
       'workholy_tutorial_primeiro_acesso_v1';
 
   static const String chaveBoasVindasConcluida =
-    'workholy_boas_vindas_concluida_v1';
+      'workholy_boas_vindas_concluida_v1';
 
   bool _verificacaoTutorialIniciada = false;
 
   List<SessaoTreino> sessoesTreino = [];
+  List<CorridaConcluida> corridasFinalizadas = [];
+
+  int _ultimaLeituraCorridas = 0;
 
   int abaSelecionada = 0;
   bool carregando = true;
 
-  List<Treino> treinos = [
-  ];
+  List<Treino> treinos = [];
 
-  List<Exercicio> exercicios = [
-  ];
+  List<Exercicio> exercicios = [];
 
   List<ItemTreino> itensTreino = [];
+
+  final TextEditingController _buscaExerciciosController =
+      TextEditingController();
+  String _termoBuscaExercicios = '';
+  final Set<String> _idsExerciciosSelecionados = <String>{};
 
   // O histórico de sessões será desenvolvido na próxima etapa.
   final List<String> historico = [];
@@ -370,6 +460,27 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
   void initState() {
     super.initState();
     carregarDados();
+    unawaited(carregarCorridasDoPainel());
+  }
+
+  @override
+  void dispose() {
+    _buscaExerciciosController.dispose();
+    super.dispose();
+  }
+
+  Future<void> carregarCorridasDoPainel() async {
+    final leitura = ++_ultimaLeituraCorridas;
+
+    try {
+      final corridas = await CorridaBanco.instancia.listarFinalizadas();
+
+      if (!mounted || leitura != _ultimaLeituraCorridas) return;
+
+      setState(() => corridasFinalizadas = corridas);
+    } catch (erro) {
+      debugPrint('Erro ao carregar corridas no painel: $erro');
+    }
   }
 
   Future<void> verificarTutorialPrimeiroAcesso() async {
@@ -378,12 +489,14 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
     _verificacaoTutorialIniciada = true;
 
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final banco = WorkHolyBanco.instancia;
 
       if (!mounted) return;
 
       // Primeira etapa: tela de boas-vindas.
-      if (prefs.getBool(chaveBoasVindasConcluida) != true) {
+      if (await banco.lerBooleano(chaveBoasVindasConcluida) != true) {
+        if (!mounted) return;
+
         final resultadoBoasVindas = await Navigator.of(context).push<bool>(
           MaterialPageRoute<bool>(
             builder: (paginaContext) => TelaBoasVindasPage(
@@ -396,13 +509,14 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
 
         if (!mounted || resultadoBoasVindas != true) return;
 
-        await prefs.setBool(chaveBoasVindasConcluida, true);
+        await banco.salvarBooleano(chaveBoasVindasConcluida, true);
       }
 
       if (!mounted) return;
 
       // Segunda etapa: tutorial, caso ainda não tenha sido concluído.
-      if (prefs.getBool(chaveTutorialConcluido) == true) return;
+      if (await banco.lerBooleano(chaveTutorialConcluido) == true) return;
+      if (!mounted) return;
 
       final resultadoTutorial = await Navigator.of(context).push<bool>(
         MaterialPageRoute<bool>(
@@ -411,7 +525,7 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
       );
 
       if (resultadoTutorial == true) {
-        await prefs.setBool(chaveTutorialConcluido, true);
+        await banco.salvarBooleano(chaveTutorialConcluido, true);
       }
     } catch (erro) {
       debugPrint('Erro na apresentação inicial do WorkHoly: $erro');
@@ -420,52 +534,25 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
 
   Future<void> carregarDados() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final dados = await WorkHolyBanco.instancia.carregarDadosTreino();
 
-      final dadosTreinos = prefs.getString(chaveTreinos);
-      final dadosExercicios = prefs.getString(chaveExercicios);
-      final dadosItens = prefs.getString(chaveItensTreino);
-      final dadosSessoes = prefs.getString(chaveSessoesTreino);
+      // A leitura é concluída antes de alterar o estado da tela.
+      final treinosCarregados = dados.treinos.map(Treino.fromJson).toList();
+      final exerciciosCarregados = dados.exercicios
+          .map(Exercicio.fromJson)
+          .toList();
+      final itensCarregados = dados.itensTreino
+          .map(ItemTreino.fromJson)
+          .toList();
+      final sessoesCarregadas = dados.sessoesTreino
+          .map(SessaoTreino.fromJson)
+          .toList();
 
-      if (dadosTreinos != null) {
-        final lista = jsonDecode(dadosTreinos) as List<dynamic>;
-        treinos = lista
-            .map(
-              (item) => Treino.fromJson(Map<String, dynamic>.from(item as Map)),
-            )
-            .toList();
-      }
-
-      if (dadosExercicios != null) {
-        final lista = jsonDecode(dadosExercicios) as List<dynamic>;
-        exercicios = lista
-            .map(
-              (item) =>
-                  Exercicio.fromJson(Map<String, dynamic>.from(item as Map)),
-            )
-            .toList();
-      }
-
-      if (dadosItens != null) {
-        final lista = jsonDecode(dadosItens) as List<dynamic>;
-        itensTreino = lista
-            .map(
-              (item) =>
-                  ItemTreino.fromJson(Map<String, dynamic>.from(item as Map)),
-            )
-            .toList();
-      }
-
-      if (dadosSessoes != null) {
-        final lista = jsonDecode(dadosSessoes) as List<dynamic>;
-
-        sessoesTreino = lista
-            .map(
-              (item) =>
-                  SessaoTreino.fromJson(Map<String, dynamic>.from(item as Map)),
-            )
-            .toList();
-      }
+      // Aplica as listas somente após todas as leituras concluírem.
+      treinos = treinosCarregados;
+      exercicios = exerciciosCarregados;
+      itensTreino = itensCarregados;
+      sessoesTreino = sessoesCarregadas;
 
       // Remove associações que apontem para registros inexistentes.
       final idsTreinos = treinos.map((t) => t.id).toSet();
@@ -476,16 +563,18 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
             !idsTreinos.contains(item.treinoId) ||
             !idsExercicios.contains(item.exercicioId),
       );
-
-      // Salva os IDs gerados ao carregar dados de versões antigas.
-      await salvarDados();
-    } catch (erro) {
+    } catch (erro, stackTrace) {
       debugPrint('Erro ao carregar dados do WorkHoly: $erro');
+      debugPrintStack(stackTrace: stackTrace);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Não foi possível carregar todos os dados salvos.'),
+            content: Text(
+              'Não foi possível carregar os dados salvos. '
+              'Evite salvar alterações até verificar os dados.',
+            ),
+            duration: Duration(seconds: 6),
           ),
         );
       }
@@ -504,26 +593,11 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
 
   Future<void> salvarDados() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-
-      await prefs.setString(
-        chaveTreinos,
-        jsonEncode(treinos.map((t) => t.toJson()).toList()),
-      );
-
-      await prefs.setString(
-        chaveExercicios,
-        jsonEncode(exercicios.map((e) => e.toJson()).toList()),
-      );
-
-      await prefs.setString(
-        chaveItensTreino,
-        jsonEncode(itensTreino.map((i) => i.toJson()).toList()),
-      );
-
-      await prefs.setString(
-        chaveSessoesTreino,
-        jsonEncode(sessoesTreino.map((sessao) => sessao.toJson()).toList()),
+      await WorkHolyBanco.instancia.salvarDadosTreino(
+        treinos: treinos.map((treino) => treino.toJson()).toList(),
+        exercicios: exercicios.map((exercicio) => exercicio.toJson()).toList(),
+        itensTreino: itensTreino.map((item) => item.toJson()).toList(),
+        sessoesTreino: sessoesTreino.map((sessao) => sessao.toJson()).toList(),
       );
     } catch (erro) {
       debugPrint('Erro ao salvar dados do WorkHoly: $erro');
@@ -564,78 +638,74 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
     if (mounted) setState(() {});
   }
 
-Future<void> iniciarSessaoTreino(String treinoId) async {
-  final indiceTreino = treinos.indexWhere((t) => t.id == treinoId);
-  if (indiceTreino < 0) return;
+  Future<void> iniciarSessaoTreino(String treinoId) async {
+    final indiceTreino = treinos.indexWhere((t) => t.id == treinoId);
+    if (indiceTreino < 0) return;
 
-  final treino = treinos[indiceTreino];
-  final itens = itensTreino
-      .where((item) => item.treinoId == treinoId)
-      .toList();
+    final treino = treinos[indiceTreino];
+    final itens = itensTreino
+        .where((item) => item.treinoId == treinoId)
+        .toList();
 
-  if (itens.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Adicione exercícios ao treino antes de iniciar.'),
-      ),
-    );
-    return;
-  }
-
-  final series = <SerieExecutada>[];
-
-  for (final item in itens) {
-    final indice = exercicios.indexWhere(
-      (e) => e.id == item.exercicioId,
-    );
-
-    final nome = indice >= 0
-        ? exercicios[indice].nome
-        : 'Exercício indisponível';
-
-    for (var numero = 1; numero <= item.series; numero++) {
-      series.add(
-        SerieExecutada(
-          id: novoId('serie'),
-          exercicioId: item.exercicioId,
-          nomeExercicio: nome,
-          numeroSerie: numero,
-          repeticoesPlanejadas: item.repeticoes,
-          repeticoesRealizadas: item.repeticoes,
-          cargaKg: item.cargaKg,
-          descansoSegundos: item.descansoSegundos,
-          concluida: false,
+    if (itens.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Adicione exercícios ao treino antes de iniciar.'),
         ),
       );
+      return;
     }
-  }
 
-  final sessao = SessaoTreino(
-    id: novoId('sessao'),
-    treinoId: treino.id,
-    nomeTreino: treino.nome,
-    inicio: DateTime.now(),
-    fim: null,
-    series: series,
-  );
+    final series = <SerieExecutada>[];
 
-  setState(() => sessoesTreino.add(sessao));
-  await salvarDados();
+    for (final item in itens) {
+      final indice = exercicios.indexWhere((e) => e.id == item.exercicioId);
 
-  if (!mounted) return;
+      final nome = indice >= 0
+          ? exercicios[indice].nome
+          : 'Exercício indisponível';
 
-  await Navigator.push<void>(
-    context,
-    MaterialPageRoute(
-      builder: (_) => ExecucaoTreinoPage(
-        sessaoInicial: sessao,
-        onSalvar: salvarSessao,
+      for (var numero = 1; numero <= item.series; numero++) {
+        series.add(
+          SerieExecutada(
+            id: novoId('serie'),
+            exercicioId: item.exercicioId,
+            nomeExercicio: nome,
+            numeroSerie: numero,
+            repeticoesPlanejadas: item.repeticoes,
+            repeticoesRealizadas: item.repeticoes,
+            cargaKg: item.cargaKg,
+            descansoSegundos: item.descansoSegundos,
+            concluida: false,
+          ),
+        );
+      }
+    }
+
+    final sessao = SessaoTreino(
+      id: novoId('sessao'),
+      treinoId: treino.id,
+      nomeTreino: treino.nome,
+      inicio: DateTime.now(),
+      fim: null,
+      series: series,
+    );
+
+    setState(() => sessoesTreino.add(sessao));
+    await salvarDados();
+
+    if (!mounted) return;
+
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            ExecucaoTreinoPage(sessaoInicial: sessao, onSalvar: salvarSessao),
       ),
-    ),
-  );
+    );
 
-  if (mounted) setState(() {});
-}
+    if (mounted) setState(() {});
+  }
 
   Future<void> salvarSessao(SessaoTreino sessao) async {
     final indice = sessoesTreino.indexWhere((s) => s.id == sessao.id);
@@ -651,14 +721,12 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
     if (mounted) setState(() {});
   }
 
-    Future<void> limparHistorico() async {
+  Future<void> limparHistorico() async {
     final quantidade = sessoesTreino.where((s) => s.finalizada).length;
 
     if (quantidade == 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Não há treinos concluídos para limpar.'),
-        ),
+        const SnackBar(content: Text('Não há treinos concluídos para limpar.')),
       );
       return;
     }
@@ -666,7 +734,7 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Limpar histórico?'),
+        title: const Text('Limpar histórico de musculação?'),
         content: Text(
           'Serão removidos $quantidade registro(s) de treinos concluídos. '
           'As sessões em andamento e os treinos cadastrados serão preservados. '
@@ -697,9 +765,47 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Histórico de treinos concluídos limpo com sucesso.'),
+        content: Text('Histórico de musculação limpo com sucesso.'),
       ),
     );
+  }
+
+  Future<void> excluirSessaoDoHistorico(SessaoTreino sessao) async {
+    if (!sessao.finalizada) return;
+
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Excluir treino do histórico?'),
+        content: Text(
+          'O registro "${sessao.nomeTreino}" será removido do histórico. '
+          'Esta ação não pode ser desfeita.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar != true || !mounted) return;
+
+    setState(() {
+      sessoesTreino.removeWhere((item) => item.id == sessao.id);
+    });
+    await salvarDados();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Treino removido do histórico.')),
+      );
+    }
   }
 
   Future<void> salvarItensDoTreino(
@@ -764,6 +870,38 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
     await salvarDados();
   }
 
+  Future<bool> adicionarExercicioPredefinido(
+    ExercicioPredefinido predefinido,
+  ) async {
+    final nomeNormalizado = predefinido.nome.trim().toLowerCase();
+    final grupoNormalizado = predefinido.grupo.trim().toLowerCase();
+
+    final jaExiste = exercicios.any(
+      (exercicio) =>
+          exercicio.nome.trim().toLowerCase() == nomeNormalizado &&
+          exercicio.grupo.trim().toLowerCase() == grupoNormalizado,
+    );
+
+    if (jaExiste) {
+      return false;
+    }
+
+    final novoExercicio = Exercicio(
+      nome: predefinido.nome,
+      grupo: predefinido.grupo,
+      series: predefinido.series,
+      repeticoes: predefinido.repeticoes,
+    );
+
+    setState(() {
+      exercicios.add(novoExercicio);
+    });
+
+    await salvarDados();
+
+    return true;
+  }
+
   Future<void> criarOuEditarExercicio([Exercicio? existente]) async {
     final resultado = await showDialog<Exercicio>(
       context: context,
@@ -788,20 +926,101 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
   }
 
   Future<void> excluirExercicio(Exercicio exercicio) async {
+    await excluirExerciciosPorIds({exercicio.id});
+  }
+
+  Future<void> excluirExerciciosSelecionados() async {
+    await excluirExerciciosPorIds(Set<String>.from(_idsExerciciosSelecionados));
+  }
+
+  Future<void> excluirExerciciosPorIds(Set<String> ids) async {
+    final selecionados = exercicios.where((exercicio) {
+      return ids.contains(exercicio.id);
+    }).toList();
+
+    if (selecionados.isEmpty) return;
+
+    final idsValidos = selecionados.map((exercicio) => exercicio.id).toSet();
+    final associacoesRemovidas = itensTreino
+        .where((item) => idsValidos.contains(item.exercicioId))
+        .length;
+
+    final quantidade = selecionados.length;
+    final mensagem = quantidade == 1
+        ? 'O exercício "${selecionados.single.nome}" também será retirado de '
+              '$associacoesRemovidas associação(ões) em treinos. Esta ação não '
+              'pode ser desfeita.'
+        : '$quantidade exercícios serão removidos, junto com '
+              '$associacoesRemovidas associação(ões) em treinos. Esta ação não '
+              'pode ser desfeita.';
+
     final confirmar = await confirmarExclusao(
-      titulo: 'Excluir exercício?',
-      mensagem:
-          'O exercício "${exercicio.nome}" também será retirado dos treinos em que estiver cadastrado.',
+      titulo: quantidade == 1
+          ? 'Excluir exercício?'
+          : 'Excluir $quantidade exercícios?',
+      mensagem: mensagem,
     );
 
     if (confirmar != true || !mounted) return;
 
     setState(() {
-      exercicios.removeWhere((e) => e.id == exercicio.id);
-      itensTreino.removeWhere((item) => item.exercicioId == exercicio.id);
+      exercicios.removeWhere((exercicio) => idsValidos.contains(exercicio.id));
+      itensTreino.removeWhere((item) => idsValidos.contains(item.exercicioId));
+      _idsExerciciosSelecionados.removeAll(idsValidos);
     });
 
     await salvarDados();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            quantidade == 1
+                ? 'Exercício excluído com sucesso.'
+                : '$quantidade exercícios excluídos com sucesso.',
+          ),
+        ),
+      );
+    }
+  }
+
+  List<Exercicio> get exerciciosFiltrados {
+    final termo = _termoBuscaExercicios.trim().toLowerCase();
+    if (termo.isEmpty) return List<Exercicio>.from(exercicios);
+
+    return exercicios.where((exercicio) {
+      final texto = '${exercicio.nome} ${exercicio.grupo}'.toLowerCase();
+      return texto.contains(termo);
+    }).toList();
+  }
+
+  bool get emModoSelecaoExercicios => _idsExerciciosSelecionados.isNotEmpty;
+
+  void alternarSelecaoExercicio(Exercicio exercicio) {
+    setState(() {
+      if (!_idsExerciciosSelecionados.add(exercicio.id)) {
+        _idsExerciciosSelecionados.remove(exercicio.id);
+      }
+    });
+  }
+
+  void selecionarTodosExerciciosFiltrados(List<Exercicio> filtrados) {
+    final idsFiltrados = filtrados.map((exercicio) => exercicio.id).toSet();
+    final todosSelecionados =
+        idsFiltrados.isNotEmpty &&
+        idsFiltrados.every(_idsExerciciosSelecionados.contains);
+
+    setState(() {
+      if (todosSelecionados) {
+        _idsExerciciosSelecionados.removeAll(idsFiltrados);
+      } else {
+        _idsExerciciosSelecionados.addAll(idsFiltrados);
+      }
+    });
+  }
+
+  void cancelarSelecaoExercicios() {
+    setState(_idsExerciciosSelecionados.clear);
   }
 
   Future<bool?> confirmarExclusao({
@@ -827,15 +1046,134 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
     );
   }
 
+  void selecionarAba(int indice) {
+    if (indice != abaSelecionada) {
+      setState(() => abaSelecionada = indice);
+    }
+
+    if (indice == 0) {
+      unawaited(carregarCorridasDoPainel());
+    }
+  }
+
+  Widget construirBarraDeNavegacao() {
+    const destinos = [
+      _DestinoNavegacao(
+        rotulo: 'Painel',
+        icone: Icons.dashboard_outlined,
+        iconeSelecionado: Icons.dashboard,
+      ),
+      _DestinoNavegacao(
+        rotulo: 'Treinos',
+        icone: Icons.view_list_outlined,
+        iconeSelecionado: Icons.view_list,
+      ),
+      _DestinoNavegacao(
+        rotulo: 'Exercícios',
+        icone: Icons.fitness_center_outlined,
+        iconeSelecionado: Icons.fitness_center,
+      ),
+      _DestinoNavegacao(
+        rotulo: 'Corrida',
+        icone: Icons.directions_run_outlined,
+        iconeSelecionado: Icons.directions_run,
+      ),
+      _DestinoNavegacao(
+        rotulo: 'Histórico',
+        icone: Icons.history_outlined,
+        iconeSelecionado: Icons.history,
+      ),
+    ];
+
+    final tema = Theme.of(context);
+    final corDestaque = widget.aparencia.corDestaque;
+
+    return Material(
+      color: tema.colorScheme.surface,
+      elevation: 8,
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 72,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            itemCount: destinos.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (context, indice) {
+              final destino = destinos[indice];
+              final selecionado = indice == abaSelecionada;
+              final cor = selecionado
+                  ? corDestaque
+                  : tema.colorScheme.onSurfaceVariant;
+
+              return Semantics(
+                button: true,
+                selected: selecionado,
+                label: destino.rotulo,
+                child: Tooltip(
+                  message: destino.rotulo,
+                  child: Material(
+                    color: Colors.transparent,
+                    borderRadius: BorderRadius.circular(16),
+                    child: InkWell(
+                      onTap: () => selecionarAba(indice),
+                      borderRadius: BorderRadius.circular(16),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        constraints: const BoxConstraints(minWidth: 120),
+                        height: 52,
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        decoration: BoxDecoration(
+                          color: selecionado
+                              ? corDestaque.withValues(alpha: 0.18)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              selecionado
+                                  ? destino.iconeSelecionado
+                                  : destino.icone,
+                              color: cor,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              destino.rotulo,
+                              maxLines: 1,
+                              softWrap: false,
+                              overflow: TextOverflow.ellipsis,
+                              style: tema.textTheme.labelLarge?.copyWith(
+                                color: cor,
+                                fontWeight: selecionado
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final paginas = [
       construirPainel(),
       construirPaginaTreinos(),
       construirPaginaExercicios(),
+      CorridaPage(onHistoricoAtualizado: carregarCorridasDoPainel),
       construirPaginaHistorico(),
-      const PerfilPraticantePage(),
-      AparenciaPage(aparencia: widget.aparencia),
     ];
 
     return Scaffold(
@@ -854,7 +1192,8 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
             onPressed: () {
               Navigator.of(context).push(
                 MaterialPageRoute<void>(
-                  builder: (_) => const ConfiguracoesPage(),
+                  builder: (_) =>
+                      ConfiguracoesPage(aparencia: widget.aparencia),
                 ),
               );
             },
@@ -867,64 +1206,7 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
           : SafeArea(
               child: IndexedStack(index: abaSelecionada, children: paginas),
             ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: abaSelecionada,
-        onDestinationSelected: (indice) {
-          setState(() => abaSelecionada = indice);
-        },
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        indicatorColor: widget.aparencia.corDestaque.withValues(alpha: 0.18),
-        destinations: [
-          NavigationDestination(
-            icon: Icon(Icons.dashboard_outlined),
-            selectedIcon: Icon(
-              Icons.dashboard,
-              color: widget.aparencia.corDestaque,
-            ),
-            label: 'Painel',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.view_list_outlined),
-            selectedIcon: Icon(
-              Icons.view_list,
-              color: widget.aparencia.corDestaque,
-            ),
-            label: 'Treinos',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.fitness_center_outlined),
-            selectedIcon: Icon(
-              Icons.fitness_center,
-              color: widget.aparencia.corDestaque,
-            ),
-            label: 'Exercícios',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.history),
-            selectedIcon: Icon(
-              Icons.history,
-              color: widget.aparencia.corDestaque,
-            ),
-            label: 'Histórico',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(
-              Icons.person,
-              color: widget.aparencia.corDestaque,
-            ),
-            label: 'Perfil',
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.palette_outlined),
-            selectedIcon: Icon(
-              Icons.palette,
-              color: widget.aparencia.corDestaque,
-            ),
-            label: 'Aparência',
-          ),
-        ],
-      ),
+      bottomNavigationBar: construirBarraDeNavegacao(),
     );
   }
 
@@ -934,22 +1216,43 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
         sessoesTreino.where((sessao) => sessao.finalizada).toList()
           ..sort((a, b) => b.inicio.compareTo(a.inicio));
 
+    final atividadesFinalizadas = <_AtividadePainel>[
+      ...sessoesFinalizadas.map((sessao) {
+        final duracao = sessao.fim!.difference(sessao.inicio).inSeconds;
+        return _AtividadePainel(
+          tipo: _TipoAtividadePainel.musculacao,
+          inicio: sessao.inicio,
+          duracaoSegundos: duracao > 0 ? duracao : 0,
+          titulo: sessao.nomeTreino,
+          seriesConcluidas: sessao.seriesConcluidas,
+        );
+      }),
+      ...corridasFinalizadas.map(
+        (corrida) => _AtividadePainel(
+          tipo: _TipoAtividadePainel.corrida,
+          inicio: corrida.inicio,
+          duracaoSegundos: corrida.duracaoSegundos,
+          titulo: 'Corrida',
+          distanciaMetros: corrida.distanciaMetros,
+        ),
+      ),
+    ]..sort((a, b) => b.inicio.compareTo(a.inicio));
+
     final inicioSemana = DateTime(
       agora.year,
       agora.month,
       agora.day,
     ).subtract(Duration(days: agora.weekday - 1));
 
-    final sessoesSemana = sessoesFinalizadas.where((sessao) {
-      return !sessao.inicio.isBefore(inicioSemana) &&
-          sessao.inicio.isBefore(inicioSemana.add(const Duration(days: 7)));
+    final atividadesSemana = atividadesFinalizadas.where((atividade) {
+      return !atividade.inicio.isBefore(inicioSemana) &&
+          atividade.inicio.isBefore(inicioSemana.add(const Duration(days: 7)));
     }).toList();
 
-    final duracaoTotal = sessoesFinalizadas.fold<int>(0, (total, sessao) {
-      final fim = sessao.fim!;
-      final segundos = fim.difference(sessao.inicio).inSeconds;
-      return total + (segundos > 0 ? segundos : 0);
-    });
+    final duracaoTotal = atividadesFinalizadas.fold<int>(
+      0,
+      (total, atividade) => total + atividade.duracaoSegundos,
+    );
 
     final seriesConcluidas = sessoesFinalizadas.fold<int>(
       0,
@@ -960,23 +1263,33 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
 
     final valoresSemana = List<int>.generate(7, (indice) {
       final dia = inicioSemana.add(Duration(days: indice));
-      return sessoesFinalizadas.where((sessao) {
-        return sessao.inicio.year == dia.year &&
-            sessao.inicio.month == dia.month &&
-            sessao.inicio.day == dia.day;
+      return atividadesFinalizadas.where((atividade) {
+        return atividade.inicio.year == dia.year &&
+            atividade.inicio.month == dia.month &&
+            atividade.inicio.day == dia.day;
       }).length;
     });
 
     const meses = [
-      'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
-      'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez',
+      'Jan',
+      'Fev',
+      'Mar',
+      'Abr',
+      'Mai',
+      'Jun',
+      'Jul',
+      'Ago',
+      'Set',
+      'Out',
+      'Nov',
+      'Dez',
     ];
 
     final valoresMeses = List<int>.generate(6, (indice) {
       final mes = DateTime(agora.year, agora.month - 5 + indice, 1);
-      return sessoesFinalizadas.where((sessao) {
-        return sessao.inicio.year == mes.year &&
-            sessao.inicio.month == mes.month;
+      return atividadesFinalizadas.where((atividade) {
+        return atividade.inicio.year == mes.year &&
+            atividade.inicio.month == mes.month;
       }).length;
     });
 
@@ -985,9 +1298,9 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
       return meses[mes.month - 1];
     });
 
-    final ultimaSessao = sessoesFinalizadas.isEmpty
+    final ultimaAtividade = atividadesFinalizadas.isEmpty
         ? null
-        : sessoesFinalizadas.first;
+        : atividadesFinalizadas.first;
 
     return ListView(
       padding: const EdgeInsets.all(18),
@@ -1022,8 +1335,8 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
               Icons.sports_gymnastics,
             ),
             cartaoResumo(
-              'Sessões nesta semana',
-              '${sessoesSemana.length}',
+              'Atividades nesta semana',
+              '${atividadesSemana.length}',
               Icons.calendar_month,
             ),
             cartaoResumo(
@@ -1037,7 +1350,7 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
         const SizedBox(height: 24),
 
         _cartaoGrafico(
-          titulo: 'Treinos por dia da semana',
+          titulo: 'Atividades por dia da semana',
           rotulos: dias,
           valores: valoresSemana,
         ),
@@ -1045,7 +1358,7 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
         const SizedBox(height: 16),
 
         _cartaoGrafico(
-          titulo: 'Sessões nos últimos 6 meses',
+          titulo: 'Atividades nos últimos 6 meses',
           rotulos: rotulosMeses,
           valores: valoresMeses,
         ),
@@ -1061,10 +1374,7 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
               children: [
                 const Text(
                   'Tempo total de treino',
-                  style: TextStyle(
-                    color: textoSecundario,
-                    fontSize: 14,
-                  ),
+                  style: TextStyle(color: textoSecundario, fontSize: 14),
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -1076,7 +1386,7 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${sessoesFinalizadas.length} sessões finalizadas',
+                  '${atividadesFinalizadas.length} atividades finalizadas',
                   style: const TextStyle(color: textoSecundario),
                 ),
               ],
@@ -1094,22 +1404,19 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Último treino concluído',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  'Última atividade concluída',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 12),
-                if (ultimaSessao == null)
+                if (ultimaAtividade == null)
                   const Text(
-                    'Você ainda não concluiu uma sessão. '
+                    'Você ainda não concluiu uma atividade. '
                     'Seu histórico aparecerá aqui.',
                     style: TextStyle(color: textoSecundario),
                   )
                 else ...[
                   Text(
-                    ultimaSessao.nomeTreino,
+                    ultimaAtividade.titulo,
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
@@ -1117,14 +1424,17 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${ultimaSessao.inicio.day.toString().padLeft(2, '0')}/'
-                    '${ultimaSessao.inicio.month.toString().padLeft(2, '0')}/'
-                    '${ultimaSessao.inicio.year}',
+                    '${ultimaAtividade.inicio.day.toString().padLeft(2, '0')}/'
+                    '${ultimaAtividade.inicio.month.toString().padLeft(2, '0')}/'
+                    '${ultimaAtividade.inicio.year}',
                     style: const TextStyle(color: textoSecundario),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${ultimaSessao.seriesConcluidas} séries concluídas',
+                    ultimaAtividade.tipo == _TipoAtividadePainel.corrida
+                        ? '${((ultimaAtividade.distanciaMetros ?? 0) / 1000).toStringAsFixed(2).replaceAll('.', ',')} km'
+                              ' • ${_formatarDuracao(ultimaAtividade.duracaoSegundos)}'
+                        : '${ultimaAtividade.seriesConcluidas} séries concluídas',
                     style: const TextStyle(color: textoSecundario),
                   ),
                 ],
@@ -1157,7 +1467,6 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
     );
   }
 
-
   String _formatarDuracao(int segundos) {
     final duracao = Duration(seconds: segundos);
     final horas = duracao.inHours;
@@ -1188,10 +1497,7 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
           children: [
             Text(
               titulo,
-              style: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.bold,
-              ),
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 20),
             SizedBox(
@@ -1246,10 +1552,7 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
               const SizedBox(height: 8),
               const Text(
                 'Ainda não há sessões concluídas neste período.',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: textoSecundario,
-                ),
+                style: TextStyle(fontSize: 12, color: textoSecundario),
               ),
             ],
           ],
@@ -1257,23 +1560,35 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
       ),
     );
   }
+
   Widget cartaoResumo(String titulo, String valor, IconData icone) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: superficie,
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icone, color: verde, size: 26),
-          const SizedBox(height: 14),
-          Text(
-            valor,
-            style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+          Icon(icone, color: verde, size: 24),
+          const SizedBox(height: 8),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              valor,
+              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+            ),
           ),
-          Text(titulo, style: const TextStyle(color: textoSecundario)),
+          const SizedBox(height: 2),
+          Text(
+            titulo,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12, color: textoSecundario),
+          ),
         ],
       ),
     );
@@ -1398,75 +1713,203 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
   }
 
   Widget construirPaginaExercicios() {
-    return ListView(
+    final filtrados = exerciciosFiltrados;
+    final todosResultadosSelecionados =
+        filtrados.isNotEmpty &&
+        filtrados.every(
+          (exercicio) => _idsExerciciosSelecionados.contains(exercicio.id),
+        );
+
+    return ListView.builder(
       padding: const EdgeInsets.all(18),
-      children: [
-        Row(
-          children: [
-            const Expanded(
-              child: Text(
-                'Exercícios',
-                style: TextStyle(fontSize: 25, fontWeight: FontWeight.bold),
-              ),
-            ),
-            IconButton.filled(
-              onPressed: () => criarOuEditarExercicio(),
-              icon: const Icon(Icons.add),
-              style: IconButton.styleFrom(
-                backgroundColor: verde,
-                foregroundColor: Colors.black,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        const Text(
-          'Cadastre exercícios para utilizá-los na montagem dos treinos.',
-          style: TextStyle(color: textoSecundario),
-        ),
-        const SizedBox(height: 16),
-        if (exercicios.isEmpty)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Text(
-              'Nenhum exercício cadastrado.',
-              textAlign: TextAlign.center,
-            ),
-          ),
-        ...exercicios.map(
-          (exercicio) => Card(
-            margin: const EdgeInsets.only(bottom: 10),
-            child: ListTile(
-              leading: const CircleAvatar(
-                backgroundColor: superficie,
-                child: Icon(Icons.fitness_center, color: verde),
-              ),
-              title: Text(
-                exercicio.nome,
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              subtitle: Text(
-                '${exercicio.grupo} • ${exercicio.series} séries • ${exercicio.repeticoes} repetições',
-                style: const TextStyle(color: textoSecundario),
-              ),
-              trailing: PopupMenuButton<String>(
-                onSelected: (opcao) {
-                  if (opcao == 'editar') {
-                    criarOuEditarExercicio(exercicio);
-                  }
-                  if (opcao == 'excluir') {
-                    excluirExercicio(exercicio);
-                  }
-                },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'editar', child: Text('Editar')),
-                  PopupMenuItem(value: 'excluir', child: Text('Excluir')),
+      itemCount: 1 + (filtrados.isEmpty ? 1 : filtrados.length),
+      itemBuilder: (context, indice) {
+        if (indice == 0) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      emModoSelecaoExercicios
+                          ? '${_idsExerciciosSelecionados.length} selecionado(s)'
+                          : 'Exercícios',
+                      style: const TextStyle(
+                        fontSize: 25,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  if (emModoSelecaoExercicios) ...[
+                    IconButton(
+                      tooltip: todosResultadosSelecionados
+                          ? 'Desmarcar resultados da busca'
+                          : 'Selecionar todos os resultados da busca',
+                      onPressed: filtrados.isEmpty
+                          ? null
+                          : () => selecionarTodosExerciciosFiltrados(filtrados),
+                      icon: Icon(
+                        todosResultadosSelecionados
+                            ? Icons.deselect
+                            : Icons.select_all,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Excluir selecionados',
+                      onPressed: excluirExerciciosSelecionados,
+                      icon: const Icon(
+                        Icons.delete_outline,
+                        color: Colors.redAccent,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Cancelar seleção',
+                      onPressed: cancelarSelecaoExercicios,
+                      icon: const Icon(Icons.close),
+                    ),
+                  ] else ...[
+                    IconButton(
+                      tooltip: 'Biblioteca de exercícios',
+                      onPressed: () async {
+                        final possuiPremium = await AssinaturaWorkHoly.instancia
+                            .possuiPremium();
+                        if (!context.mounted) return;
+                        if (!possuiPremium) {
+                          await Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const PlanoPremiumPage(
+                                recurso: 'Biblioteca de exercícios',
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => BibliotecaExerciciosPage(
+                              exerciciosCadastrados: List<Exercicio>.from(
+                                exercicios,
+                              ),
+                              onAdicionar: adicionarExercicioPredefinido,
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.library_books_outlined),
+                    ),
+                    const SizedBox(width: 4),
+                    IconButton.filled(
+                      tooltip: 'Criar exercício personalizado',
+                      onPressed: () => criarOuEditarExercicio(),
+                      icon: const Icon(Icons.add),
+                      style: IconButton.styleFrom(
+                        backgroundColor: verde,
+                        foregroundColor: Colors.black,
+                      ),
+                    ),
+                  ],
                 ],
               ),
+              const SizedBox(height: 6),
+              Text(
+                emModoSelecaoExercicios
+                    ? 'Toque nos exercícios para selecionar ou desmarcar.'
+                    : 'Cadastre exercícios para utilizá-los na montagem dos treinos.',
+                style: const TextStyle(color: textoSecundario),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _buscaExerciciosController,
+                onChanged: (texto) {
+                  setState(() => _termoBuscaExercicios = texto);
+                },
+                textInputAction: TextInputAction.search,
+                decoration: InputDecoration(
+                  hintText: 'Buscar por nome ou grupo',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _termoBuscaExercicios.isEmpty
+                      ? null
+                      : IconButton(
+                          tooltip: 'Limpar busca',
+                          onPressed: () {
+                            _buscaExerciciosController.clear();
+                            setState(() => _termoBuscaExercicios = '');
+                          },
+                          icon: const Icon(Icons.clear),
+                        ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '${filtrados.length} ${filtrados.length == 1 ? 'exercício encontrado' : 'exercícios encontrados'}'
+                '${emModoSelecaoExercicios ? ' • toque longo para continuar a seleção' : ' • toque longo para selecionar vários'}',
+                style: const TextStyle(color: textoSecundario, fontSize: 12),
+              ),
+              const SizedBox(height: 10),
+            ],
+          );
+        }
+
+        if (filtrados.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              exercicios.isEmpty
+                  ? 'Nenhum exercício cadastrado.'
+                  : 'Nenhum exercício encontrado para esta busca.',
+              textAlign: TextAlign.center,
             ),
+          );
+        }
+
+        final exercicio = filtrados[indice - 1];
+        final selecionado = _idsExerciciosSelecionados.contains(exercicio.id);
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          color: selecionado ? verde.withValues(alpha: 0.12) : null,
+          child: ListTile(
+            onTap: emModoSelecaoExercicios
+                ? () => alternarSelecaoExercicio(exercicio)
+                : null,
+            onLongPress: () => alternarSelecaoExercicio(exercicio),
+            leading: emModoSelecaoExercicios
+                ? Checkbox(
+                    value: selecionado,
+                    onChanged: (_) => alternarSelecaoExercicio(exercicio),
+                  )
+                : const CircleAvatar(
+                    backgroundColor: superficie,
+                    child: Icon(Icons.fitness_center, color: verde),
+                  ),
+            title: Text(
+              exercicio.nome,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            subtitle: Text(
+              '${exercicio.grupo} • ${exercicio.series} séries • ${exercicio.repeticoes} repetições',
+              style: const TextStyle(color: textoSecundario),
+            ),
+            trailing: emModoSelecaoExercicios
+                ? null
+                : PopupMenuButton<String>(
+                    onSelected: (opcao) {
+                      if (opcao == 'editar') {
+                        criarOuEditarExercicio(exercicio);
+                      }
+                      if (opcao == 'excluir') {
+                        excluirExercicio(exercicio);
+                      }
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'editar', child: Text('Editar')),
+                      PopupMenuItem(value: 'excluir', child: Text('Excluir')),
+                    ],
+                  ),
           ),
-        ),
-      ],
+        );
+      },
     );
   }
 
@@ -1489,10 +1932,7 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
             const Expanded(
               child: Text(
                 'Histórico',
-                style: TextStyle(
-                  fontSize: 25,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 25, fontWeight: FontWeight.bold),
               ),
             ),
             if (sessoesTreino.any((sessao) => sessao.finalizada))
@@ -1517,10 +1957,7 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
                   SizedBox(height: 12),
                   Text(
                     'Nenhuma sessão registrada',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   SizedBox(height: 8),
                   Text(
@@ -1559,17 +1996,21 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
                           ),
                         ),
                         if (sessao.finalizada &&
-                            treinos.any(
-                              (t) => t.id == sessao.treinoId,
-                            ))
+                            treinos.any((t) => t.id == sessao.treinoId))
                           IconButton(
                             tooltip: 'Refazer treino',
                             onPressed: () {
                               iniciarSessaoTreino(sessao.treinoId);
                             },
+                            icon: const Icon(Icons.replay, color: verde),
+                          ),
+                        if (sessao.finalizada)
+                          IconButton(
+                            tooltip: 'Excluir do histórico',
+                            onPressed: () => excluirSessaoDoHistorico(sessao),
                             icon: const Icon(
-                              Icons.replay,
-                              color: verde,
+                              Icons.delete_outline,
+                              color: Colors.redAccent,
                             ),
                           ),
                       ],
@@ -1603,7 +2044,9 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
 }
 
 class ConfiguracoesPage extends StatelessWidget {
-  const ConfiguracoesPage({super.key});
+  const ConfiguracoesPage({super.key, required this.aparencia});
+
+  final WorkHolyAparencia aparencia;
 
   void mostrarEmBreve(BuildContext context, String recurso) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -1614,29 +2057,24 @@ class ConfiguracoesPage extends StatelessWidget {
   }
 
   Future<void> abrirTutorial(BuildContext context) async {
-      final resultado = await Navigator.of(context).push<bool>(
-        MaterialPageRoute<bool>(
-          builder: (_) => const TutorialPrimeiroAcessoPage(),
-        ),
-      );
+    final resultado = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => const TutorialPrimeiroAcessoPage(),
+      ),
+    );
 
-      if (resultado == true) {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool(
-          'workholy_tutorial_primeiro_acesso_v1',
-          true,
-        );
-      }
+    if (resultado == true) {
+      await WorkHolyBanco.instancia.salvarBooleano(
+        'workholy_tutorial_primeiro_acesso_v1',
+        true,
+      );
     }
+  }
 
   void mostrarSobre(BuildContext context) {
-    showAboutDialog(
-      context: context,
-      applicationName: 'WorkHoly Mobile',
-      applicationVersion: '1.0.0',
-      applicationIcon: const Icon(Icons.fitness_center, color: verde, size: 36),
-      applicationLegalese: 'Aplicativo de treinamento físico.',
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const SobreWorkHolyPage()));
   }
 
   @override
@@ -1676,7 +2114,13 @@ class ConfiguracoesPage extends StatelessWidget {
                   title: const Text('Perfil do treinador'),
                   subtitle: const Text('Nome e informações profissionais'),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: () => mostrarEmBreve(context, 'Perfil do treinador'),
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const PerfilPraticantePage(),
+                      ),
+                    );
+                  },
                 ),
                 const Divider(height: 1, indent: 16, endIndent: 16),
                 ListTile(
@@ -1684,8 +2128,13 @@ class ConfiguracoesPage extends StatelessWidget {
                   title: const Text('Aparência'),
                   subtitle: const Text('Personalização visual'),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: () =>
-                      mostrarEmBreve(context, 'Personalização da aparência'),
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => AparenciaPage(aparencia: aparencia),
+                      ),
+                    );
+                  },
                 ),
                 const Divider(height: 1, indent: 16, endIndent: 16),
                 ListTile(
@@ -1723,7 +2172,9 @@ class ConfiguracoesPage extends StatelessWidget {
                 ListTile(
                   leading: const Icon(Icons.school_outlined, color: verde),
                   title: const Text('Ver tutorial novamente'),
-                  subtitle: const Text('Revise as principais funções do aplicativo'),
+                  subtitle: const Text(
+                    'Revise as principais funções do aplicativo',
+                  ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => abrirTutorial(context),
                 ),
@@ -1739,6 +2190,215 @@ class ConfiguracoesPage extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class SobreWorkHolyPage extends StatelessWidget {
+  const SobreWorkHolyPage({super.key});
+
+  static const String direitosAutorais =
+      '© 2026 Murilo da Silva Machado. Todos os direitos reservados.';
+
+  static const String termosDeUso = '''
+TERMOS DE USO — WORKHOLY MOBILE
+
+1. FINALIDADE
+O WorkHoly é um aplicativo destinado à organização e ao acompanhamento de
+treinamentos físicos.
+
+2. PROPRIEDADE INTELECTUAL
+O software original e os elementos de autoria própria são protegidos pela
+legislação aplicável. Os direitos sobre componentes de terceiros permanecem
+sujeitos às respectivas licenças.
+
+3. USO NÃO AUTORIZADO
+Não é permitida a reprodução, redistribuição, comercialização ou modificação
+não autorizada dos elementos protegidos, salvo quando houver autorização
+do titular ou permissão legal.
+
+4. MEDIDAS LEGAIS
+Violações poderão resultar nas medidas legais cabíveis, conforme a legislação
+aplicável e as circunstâncias do caso.
+
+5. RESPONSABILIDADE
+O aplicativo é uma ferramenta de apoio à organização dos treinos e não substitui
+a orientação de profissionais de saúde ou de educação física.
+
+6. ATUALIZAÇÕES
+Estes termos poderão ser revisados conforme a evolução do aplicativo.
+''';
+
+  static const String politicaPrivacidade = '''
+POLÍTICA DE PRIVACIDADE — WORKHOLY MOBILE
+
+1. DADOS
+O aplicativo pode tratar dados de conta, autenticação e informações inseridas
+pelo usuário, conforme os recursos utilizados e os serviços integrados.
+
+2. FINALIDADE
+Os dados devem ser utilizados para disponibilizar as funcionalidades do
+aplicativo, manter a conta e garantir seu funcionamento e segurança.
+
+3. SERVIÇOS DE TERCEIROS
+O aplicativo utiliza serviços integrados, incluindo Firebase. O tratamento
+realizado por esses serviços depende da configuração efetiva do projeto e
+das políticas aplicáveis.
+
+4. SEGURANÇA
+São necessárias medidas técnicas e administrativas adequadas para proteger
+os dados contra acessos não autorizados e situações indevidas.
+
+5. DIREITOS DO TITULAR
+Os titulares podem exercer os direitos previstos na legislação aplicável,
+incluindo a Lei Geral de Proteção de Dados (LGPD), quando pertinente.
+
+6. CONTATO
+O canal de contato para solicitações de privacidade deverá ser informado
+pelo responsável pelo aplicativo antes da distribuição pública.
+''';
+
+  void abrirDocumento(BuildContext context, String titulo, String conteudo) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => DocumentoLegalPage(titulo: titulo, conteudo: conteudo),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Sobre o WorkHoly')),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          const SizedBox(height: 12),
+          const Center(
+            child: CircleAvatar(
+              radius: 42,
+              child: Icon(Icons.fitness_center, size: 42),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'WorkHoly Mobile',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.headlineSmall
+                ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Treinamento, organização e evolução.',
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 28),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'DESENVOLVEDOR',
+                    style: TextStyle(
+                      color: verde,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Murilo da Silva Machado',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('Versão 1.0.0'),
+                  const SizedBox(height: 12),
+                  const Text(
+                    direitosAutorais,
+                    style: TextStyle(color: textoSecundario, height: 1.5),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'INFORMAÇÕES LEGAIS',
+            style: TextStyle(
+              color: verde,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.2,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.gavel_outlined),
+                  title: const Text('Termos de uso'),
+                  subtitle: const Text(
+                    'Regras de utilização e propriedade intelectual',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () =>
+                      abrirDocumento(context, 'Termos de uso', termosDeUso),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.privacy_tip_outlined),
+                  title: const Text('Política de privacidade'),
+                  subtitle: const Text('Dados pessoais, utilização e proteção'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => abrirDocumento(
+                    context,
+                    'Política de privacidade',
+                    politicaPrivacidade,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'O uso e a distribuição do aplicativo estão sujeitos à legislação '
+            'aplicável e às licenças dos componentes utilizados.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: textoSecundario, fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class DocumentoLegalPage extends StatelessWidget {
+  const DocumentoLegalPage({
+    super.key,
+    required this.titulo,
+    required this.conteudo,
+  });
+
+  final String titulo;
+  final String conteudo;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(titulo)),
+      body: SelectionArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Text(
+            conteudo,
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.7),
+          ),
+        ),
       ),
     );
   }
@@ -2002,7 +2662,7 @@ class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
   int descansoPreferido = 90;
 
   static const String chaveTutorialConcluido =
-    'workholy_tutorial_primeiro_acesso_v1';
+      'workholy_tutorial_primeiro_acesso_v1';
 
   bool _verificacaoTutorialIniciada = false;
 
@@ -2021,10 +2681,10 @@ class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
     _verificacaoTutorialIniciada = true;
 
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final banco = WorkHolyBanco.instancia;
+      final tutorialConcluido = await banco.lerBooleano(chaveTutorialConcluido);
 
-      if (!mounted ||
-          prefs.getBool(chaveTutorialConcluido) == true) {
+      if (!mounted || tutorialConcluido == true) {
         return;
       }
 
@@ -2035,7 +2695,7 @@ class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
       );
 
       if (resultado == true) {
-        await prefs.setBool(chaveTutorialConcluido, true);
+        await banco.salvarBooleano(chaveTutorialConcluido, true);
       }
     } catch (erro) {
       debugPrint('Erro ao abrir o tutorial inicial: $erro');
@@ -2043,8 +2703,8 @@ class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
   }
 
   Future<void> _carregarDescansoPreferido() async {
-    final prefs = await SharedPreferences.getInstance();
-    final valor = prefs.getInt(_chaveDescanso) ?? 90;
+    final valor =
+        await WorkHolyBanco.instancia.lerInteiro(_chaveDescanso) ?? 90;
 
     if (!mounted) return;
 
@@ -3459,6 +4119,442 @@ class _EditarSerieDialogState extends State<EditarSerieDialog> {
         ),
         FilledButton(onPressed: salvar, child: const Text('Salvar')),
       ],
+    );
+  }
+}
+
+class BibliotecaExerciciosPage extends StatefulWidget {
+  final List<Exercicio> exerciciosCadastrados;
+  final Future<bool> Function(ExercicioPredefinido) onAdicionar;
+
+  const BibliotecaExerciciosPage({
+    super.key,
+    required this.exerciciosCadastrados,
+    required this.onAdicionar,
+  });
+
+  @override
+  State<BibliotecaExerciciosPage> createState() =>
+      _BibliotecaExerciciosPageState();
+}
+
+class _BibliotecaExerciciosPageState extends State<BibliotecaExerciciosPage> {
+  final TextEditingController _buscaController = TextEditingController();
+  String _grupoSelecionado = 'Todos';
+  final Set<String> _adicionadosNestaSessao = {};
+  final Set<String> _processando = {};
+  List<ExercicioPredefinido> _catalogo = const [];
+  String? _erroCatalogo;
+
+  List<String> get _grupos {
+    final grupos =
+        _catalogo.map((exercicio) => exercicio.grupo).toSet().toList()..sort();
+    return ['Todos', ...grupos];
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _carregarCatalogo();
+  }
+
+  Future<void> _carregarCatalogo() async {
+    try {
+      final catalogo = await CatalogoExercicios.instancia.carregar();
+      if (!mounted) return;
+
+      setState(() {
+        _catalogo = catalogo;
+        _erroCatalogo = null;
+      });
+    } catch (erro) {
+      if (!mounted) return;
+      setState(() => _erroCatalogo = erro.toString());
+    }
+  }
+
+  String _chave(ExercicioPredefinido exercicio) =>
+      '${exercicio.nome.trim().toLowerCase()}|'
+      '${exercicio.grupo.trim().toLowerCase()}';
+
+  bool _jaCadastrado(ExercicioPredefinido exercicio) {
+    final chave = _chave(exercicio);
+
+    return _adicionadosNestaSessao.contains(chave) ||
+        widget.exerciciosCadastrados.any(
+          (item) =>
+              item.nome.trim().toLowerCase() ==
+                  exercicio.nome.trim().toLowerCase() &&
+              item.grupo.trim().toLowerCase() ==
+                  exercicio.grupo.trim().toLowerCase(),
+        );
+  }
+
+  List<ExercicioPredefinido> get _exerciciosFiltrados {
+    final busca = _buscaController.text.trim().toLowerCase();
+
+    return _catalogo.where((exercicio) {
+      final correspondeGrupo =
+          _grupoSelecionado == 'Todos' || exercicio.grupo == _grupoSelecionado;
+
+      final termosBusca = [
+        exercicio.nome,
+        exercicio.grupo,
+        exercicio.equipamento,
+        exercicio.categoria,
+        ...exercicio.musculosPrimarios,
+        ...exercicio.musculosSecundarios,
+      ].join(' ').toLowerCase();
+
+      final correspondeBusca = termosBusca.contains(busca);
+
+      return correspondeGrupo && correspondeBusca;
+    }).toList();
+  }
+
+  Future<void> _adicionar(ExercicioPredefinido exercicio) async {
+    final chave = _chave(exercicio);
+
+    if (_jaCadastrado(exercicio) || _processando.contains(chave)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Esse exercício já está cadastrado.')),
+      );
+      return;
+    }
+
+    setState(() => _processando.add(chave));
+
+    try {
+      final sucesso = await widget.onAdicionar(exercicio);
+
+      if (!mounted) return;
+
+      setState(() {
+        _processando.remove(chave);
+
+        if (sucesso) {
+          _adicionadosNestaSessao.add(chave);
+        }
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            sucesso
+                ? '${exercicio.nome} adicionado ao acervo!'
+                : 'Esse exercício já está cadastrado.',
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() => _processando.remove(chave));
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Não foi possível adicionar o exercício.'),
+        ),
+      );
+    }
+  }
+
+  void _mostrarDetalhes(ExercicioPredefinido exercicio) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.72,
+        minChildSize: 0.45,
+        maxChildSize: 0.94,
+        builder: (context, controlador) => SafeArea(
+          top: false,
+          child: ListView(
+            controller: controlador,
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+            children: [
+              Center(
+                child: Container(
+                  width: 42,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                exercicio.nome,
+                style: Theme.of(context).textTheme.headlineSmall
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  Chip(label: Text(exercicio.grupo)),
+                  if (exercicio.equipamento.isNotEmpty)
+                    Chip(label: Text(exercicio.equipamento)),
+                  if (exercicio.nivel.isNotEmpty)
+                    Chip(label: Text(exercicio.nivel)),
+                  if (exercicio.categoria.isNotEmpty)
+                    Chip(label: Text(exercicio.categoria)),
+                ],
+              ),
+              if (exercicio.caminhosImagensAssets.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                SizedBox(
+                  height: 240,
+                  child: PageView.builder(
+                    itemCount: exercicio.caminhosImagensAssets.length,
+                    itemBuilder: (context, index) {
+                      final caminho = exercicio.caminhosImagensAssets[index];
+
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: Container(
+                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                            alignment: Alignment.center,
+                            child: Image.asset(
+                              caminho,
+                              fit: BoxFit.contain,
+                              width: double.infinity,
+                              errorBuilder: (context, erro, stackTrace) {
+                                return const Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.image_not_supported_outlined, size: 42),
+                                    SizedBox(height: 8),
+                                    Text('Imagem indisponível'),
+                                  ],
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                if (exercicio.caminhosImagensAssets.length > 1) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Deslize para ver as '
+                    '${exercicio.caminhosImagensAssets.length} imagens do exercício',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: textoSecundario, fontSize: 12),
+                  ),
+                ],
+              ],
+              if (exercicio.musculosPrimarios.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                const Text(
+                  'Músculos principais',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                Text(exercicio.musculosPrimarios.join(', ')),
+              ],
+              if (exercicio.musculosSecundarios.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                const Text(
+                  'Músculos secundários',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                Text(exercicio.musculosSecundarios.join(', ')),
+              ],
+              if (exercicio.instrucoes.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                const Text(
+                  'Instruções originais',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                ...exercicio.instrucoes.indexed.map(
+                  (entrada) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Text('${entrada.$1 + 1}. ${entrada.$2}'),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 20),
+              const Text(
+                'Dados: Free Exercise DB (Unlicense/public domain).',
+                style: TextStyle(color: textoSecundario, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _buscaController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_erroCatalogo != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Biblioteca de exercícios')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.error_outline, size: 44),
+                const SizedBox(height: 12),
+                const Text(
+                  'Não foi possível abrir o catálogo de exercícios.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: _carregarCatalogo,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Tentar novamente'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (_catalogo.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Biblioteca de exercícios')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final filtrados = _exerciciosFiltrados;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Biblioteca de exercícios')),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: TextField(
+              controller: _buscaController,
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                hintText: 'Pesquisar exercício...',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _buscaController.text.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () {
+                          _buscaController.clear();
+                          setState(() {});
+                        },
+                      ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+          ),
+          SizedBox(
+            height: 52,
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              scrollDirection: Axis.horizontal,
+              itemCount: _grupos.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                final grupo = _grupos[index];
+
+                return Center(
+                  child: FilterChip(
+                    label: Text(grupo),
+                    selected: _grupoSelecionado == grupo,
+                    onSelected: (_) {
+                      setState(() => _grupoSelecionado = grupo);
+                    },
+                  ),
+                );
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '${filtrados.length} de ${_catalogo.length} exercícios disponíveis',
+                style: const TextStyle(color: textoSecundario),
+              ),
+            ),
+          ),
+          Expanded(
+            child: filtrados.isEmpty
+                ? const Center(child: Text('Nenhum exercício encontrado.'))
+                : ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    itemCount: filtrados.length,
+                    itemBuilder: (context, index) {
+                      final exercicio = filtrados[index];
+                      final cadastrado = _jaCadastrado(exercicio);
+                      final processando = _processando.contains(
+                        _chave(exercicio),
+                      );
+
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          onTap: () => _mostrarDetalhes(exercicio),
+                          leading: const CircleAvatar(
+                            child: Icon(Icons.fitness_center),
+                          ),
+                          title: Text(
+                            exercicio.nome,
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          subtitle: Text(
+                            '${exercicio.grupo}'
+                            '${exercicio.equipamento.isEmpty ? '' : ' • ${exercicio.equipamento}'}'
+                            '${exercicio.nivel.isEmpty ? '' : ' • ${exercicio.nivel}'}',
+                          ),
+                          trailing: cadastrado
+                              ? const Icon(
+                                  Icons.check_circle,
+                                  color: Colors.green,
+                                )
+                              : IconButton(
+                                  tooltip: 'Adicionar exercício',
+                                  onPressed: processando
+                                      ? null
+                                      : () => _adicionar(exercicio),
+                                  icon: processando
+                                      ? const SizedBox(
+                                          width: 22,
+                                          height: 22,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : const Icon(Icons.add_circle),
+                                ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }

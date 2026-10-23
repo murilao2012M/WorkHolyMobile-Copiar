@@ -1,12 +1,8 @@
-
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
-enum ModoAparencia {
-  escuro,
-  claro,
-  automatico,
-}
+import '../dados/workholy_banco.dart';
+
+enum ModoAparencia { escuro, claro, automatico }
 
 class WorkHolyAparencia extends ChangeNotifier {
   static const String _chaveModo = 'workholy_aparencia_modo_v1';
@@ -31,10 +27,9 @@ class WorkHolyAparencia extends ChangeNotifier {
   Color get corDestaque => cores[_indiceCor];
 
   Future<void> carregar() async {
-    final prefs = await SharedPreferences.getInstance();
-
-    final modoSalvo = prefs.getString(_chaveModo);
-    final corSalva = prefs.getInt(_chaveCor);
+    final banco = WorkHolyBanco.instancia;
+    final modoSalvo = await banco.lerTexto(_chaveModo);
+    final corSalva = await banco.lerInteiro(_chaveCor);
 
     _modo = ModoAparencia.values.firstWhere(
       (item) => item.name == modoSalvo,
@@ -55,8 +50,7 @@ class WorkHolyAparencia extends ChangeNotifier {
     _modo = novoModo;
     notifyListeners();
 
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_chaveModo, novoModo.name);
+    await WorkHolyBanco.instancia.salvarTexto(_chaveModo, novoModo.name);
   }
 
   Future<void> definirCor(int indice) async {
@@ -67,8 +61,7 @@ class WorkHolyAparencia extends ChangeNotifier {
     _indiceCor = indice;
     notifyListeners();
 
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_chaveCor, indice);
+    await WorkHolyBanco.instancia.salvarInteiro(_chaveCor, indice);
   }
 
   ThemeData criarTema(Brightness brilho) {
@@ -79,17 +72,11 @@ class WorkHolyAparencia extends ChangeNotifier {
         ? const Color(0xFF10120F)
         : const Color(0xFFF5F6F2);
 
-    final superficieTema = escuro
-        ? const Color(0xFF1B1E19)
-        : Colors.white;
+    final superficieTema = escuro ? const Color(0xFF1B1E19) : Colors.white;
 
-    final textoPrincipal = escuro
-        ? Colors.white
-        : const Color(0xFF20231D);
+    final textoPrincipal = escuro ? Colors.white : const Color(0xFF20231D);
 
-    final borda = escuro
-        ? Colors.white12
-        : const Color(0xFFDDE1D7);
+    final borda = escuro ? Colors.white12 : const Color(0xFFDDE1D7);
 
     final scheme = ColorScheme.fromSeed(
       seedColor: destaque,
@@ -113,9 +100,7 @@ class WorkHolyAparencia extends ChangeNotifier {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: superficieTema,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: borda),
@@ -129,10 +114,7 @@ class WorkHolyAparencia extends ChangeNotifier {
         style: ElevatedButton.styleFrom(
           backgroundColor: destaque,
           foregroundColor: escuro ? Colors.black : Colors.black,
-          padding: const EdgeInsets.symmetric(
-            horizontal: 18,
-            vertical: 13,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
         ),
       ),
     );

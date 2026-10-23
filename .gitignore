@@ -68,6 +68,8 @@ android/local.properties
 key.properties
 .env
 .env.*
+/backend/functions/node_modules/
+/backend/functions/lib/
 
 # Backups antigos do código Dart
 /lib/main.backup-antes-execucao.dart

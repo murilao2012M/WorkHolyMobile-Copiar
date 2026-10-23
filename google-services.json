@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "804012155841",
+    "project_id": "workholy-mobile",
+    "storage_bucket": "workholy-mobile.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:804012155841:android:6cf12b7c27c6d0eb434540",
+        "android_client_info": {
+          "package_name": "com.company.workholy"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAhbXRORXF00YgRjvgEdD-pgoE0njPS7Cc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
