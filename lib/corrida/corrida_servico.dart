@@ -27,6 +27,8 @@ class CorridaTaskHandler extends TaskHandler {
 
   double _distancia = 0;
   int _duracaoSegundos = 0;
+  double _caloriasEstimadas = 0;
+  double? _pesoKg;
   int _tempoAcumuladoMs = 0;
   int? _inicioTrechoMs;
 
@@ -58,6 +60,9 @@ class CorridaTaskHandler extends TaskHandler {
     _estado = registro['estado'] as String;
     _distancia = (registro['distancia_metros'] as num).toDouble();
     _duracaoSegundos = registro['duracao_segundos'] as int;
+    _caloriasEstimadas =
+        (registro['calorias_estimadas'] as num?)?.toDouble() ?? 0.0;
+    _pesoKg = (registro['peso_kg'] as num?)?.toDouble();
     _tempoAcumuladoMs = _duracaoSegundos * 1000;
     _ultimoSalvamentoMs = DateTime.now().millisecondsSinceEpoch;
     _distanciaNoUltimoSalvamento = _distancia;
@@ -125,6 +130,8 @@ class CorridaTaskHandler extends TaskHandler {
       'estado': _estado,
       'duracao': _duracaoSegundos,
       'distancia': _distancia,
+      'calorias': _caloriasEstimadas,
+      'peso_kg': _pesoKg,
       'latitude': ultimoPonto?['lat'],
       'longitude': ultimoPonto?['lon'],
       'precisao_gps': _precisaoGps,
@@ -197,6 +204,8 @@ class CorridaTaskHandler extends TaskHandler {
     final duracao = _duracaoSegundos;
     final distancia = _distancia;
     final estado = finalizar ? 'finalizada' : _estado;
+    final calorias = _caloriasEstimadas;
+    final pesoKg = _pesoKg;
     final rota = _rota.map(Map<String, double>.from).toList(growable: false);
     final fimMs = finalizar ? DateTime.now().millisecondsSinceEpoch : null;
 
@@ -211,9 +220,11 @@ class CorridaTaskHandler extends TaskHandler {
             estado: estado,
             rota: rota,
             fimMs: fimMs,
+            caloriasEstimadas: calorias,
+            pesoKg: pesoKg,
           );
 
-          // Atualiza os indicadores somente após a gravação bem-sucedida.
+          // Atualiza os indicadores somente após salvar com sucesso.
           _ultimoSalvamentoMs = DateTime.now().millisecondsSinceEpoch;
           _distanciaNoUltimoSalvamento = distancia;
         })
@@ -221,8 +232,8 @@ class CorridaTaskHandler extends TaskHandler {
           _salvamentosPendentes -= 1;
         });
 
-    // A operação retornada ao chamador mantém a falha.
-    // A fila interna, porém, é recuperada para permitir novas gravações.
+    // A operação retornada mantém a falha para o chamador.
+    // A fila interna é recuperada para permitir novas gravações.
     _filaDePersistencia = operacao.then<void>(
       (_) {},
       onError: (Object erro, StackTrace stack) {
@@ -272,7 +283,20 @@ class CorridaTaskHandler extends TaskHandler {
                 'GPS conectado • precisão de ±${posicao.accuracy.round()} m';
 
             if (haviaPontoAnterior) {
-              _distancia += resultado.distanciaMetros;
+              final distanciaAceita = resultado.distanciaMetros;
+
+              // Soma somente a distância aprovada pelo filtro GPS.
+              _distancia += distanciaAceita;
+
+              // Estimativa: peso (kg) x distância (km).
+              // Sem peso válido, não inventa um valor de calorias.
+              if (_pesoKg != null &&
+                  _pesoKg!.isFinite &&
+                  _pesoKg! > 0 &&
+                  distanciaAceita.isFinite &&
+                  distanciaAceita > 0) {
+                _caloriasEstimadas += _pesoKg! * (distanciaAceita / 1000);
+              }
             }
 
             final pontoDaRota = <String, double>{
@@ -351,6 +375,15 @@ class CorridaTaskHandler extends TaskHandler {
     _estado = 'em_andamento';
     _distancia = 0;
     _duracaoSegundos = 0;
+    _caloriasEstimadas = 0;
+    final pesoRecebido = data['pesoKg'];
+    _pesoKg =
+        pesoRecebido is num &&
+            pesoRecebido.isFinite &&
+            pesoRecebido > 0 &&
+            pesoRecebido <= 500
+        ? pesoRecebido.toDouble()
+        : null;
     _tempoAcumuladoMs = 0;
     _inicioTrechoMs = DateTime.now().millisecondsSinceEpoch;
     _ultimoPontoAceito = null;

@@ -1,4 +1,4 @@
-﻿
+
 name: workholy_mobile
 description: "A new Flutter project."
 publish_to: 'none'
@@ -27,6 +27,7 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.4
   sqflite_common_ffi: ^2.3.6
+  firebase_core_platform_interface: 8.1.1
 
 flutter:
   uses-material-design: true

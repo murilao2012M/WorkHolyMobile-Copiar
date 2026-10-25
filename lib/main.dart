@@ -770,6 +770,24 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
     );
   }
 
+Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
+  if (sessao.finalizada) return;
+
+  await Navigator.push<void>(
+    context,
+    MaterialPageRoute(
+      builder: (_) => ExecucaoTreinoPage(
+        sessaoInicial: sessao,
+        onSalvar: salvarSessao,
+      ),
+    ),
+  );
+
+  if (mounted) {
+    setState(() {});
+  }
+}
+
   Future<void> excluirSessaoDoHistorico(SessaoTreino sessao) async {
     if (!sessao.finalizada) return;
 
@@ -1995,6 +2013,15 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
                             ),
                           ),
                         ),
+                        if (!sessao.finalizada)
+                          IconButton(
+                            tooltip: 'Retomar treino',
+                            onPressed: () => retomarSessaoTreino(sessao),
+                            icon: const Icon(
+                              Icons.play_circle_outline,
+                              color: verde,
+                            ),
+                          ),
                         if (sessao.finalizada &&
                             treinos.any((t) => t.id == sessao.treinoId))
                           IconButton(
@@ -3484,13 +3511,13 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
 
       if (!mounted) return;
 
-      setState(() {
-        finalizando = false;
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Treino concluído e salvo no histórico!')),
+      await Navigator.pushReplacement<void, void>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ResumoTreinoPage(sessao: encerrada),
+        ),
       );
+
     } catch (erro) {
       if (!mounted) return;
 
@@ -3500,7 +3527,9 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao concluir o treino: $erro')),
+        SnackBar(
+          content: Text('Erro ao concluir o treino: $erro'),
+        ),
       );
     }
   }
@@ -3543,62 +3572,69 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
     await atualizarSerie(resultado);
   }
 
-  Future<void> finalizarTreino() async {
-    if (finalizando || salvando || sessao.finalizada) return;
 
-    final confirmar = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Finalizar treino?'),
-        content: Text(
-          'Você concluiu ${sessao.seriesConcluidas} de '
-          '${sessao.series.length} séries.\n\n'
-          'Deseja encerrar esta sessão?',
+Future<void> finalizarTreino() async {
+  if (finalizando || salvando || sessao.finalizada) return;
+
+  final confirmar = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Finalizar treino?'),
+      content: Text(
+        'Você concluiu ${sessao.seriesConcluidas} de '
+        '${sessao.series.length} séries.\n\n'
+        'Deseja encerrar esta sessão?',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext, false),
+          child: const Text('Continuar treino'),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Continuar treino'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Finalizar'),
-          ),
-        ],
+        FilledButton(
+          onPressed: () => Navigator.pop(dialogContext, true),
+          child: const Text('Finalizar'),
+        ),
+      ],
+    ),
+  );
+
+  if (confirmar != true || !mounted) return;
+
+  final sessaoAnterior = sessao;
+  final encerrada = sessao.copiar(fim: DateTime.now());
+
+  setState(() {
+    finalizando = true;
+    sessao = encerrada;
+  });
+
+  try {
+    await widget.onSalvar(encerrada);
+
+    if (!mounted) return;
+
+    await Navigator.pushReplacement<void, void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ResumoTreinoPage(sessao: encerrada),
       ),
     );
-
-    if (confirmar != true || !mounted) return;
-
-    final encerrada = sessao.copiar(fim: DateTime.now());
+  } catch (erro) {
+    if (!mounted) return;
 
     setState(() {
-      finalizando = true;
-      sessao = encerrada;
+      sessao = sessaoAnterior;
+      finalizando = false;
     });
 
-    try {
-      await widget.onSalvar(encerrada);
-
-      if (!mounted) return;
-      Navigator.pop(context);
-    } catch (erro) {
-      if (!mounted) return;
-
-      temporizador?.cancel();
-
-      setState(() {
-        finalizando = true;
-        sessao = encerrada;
-        descansoAtivo = false;
-        descansoPausado = false;
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Não foi possível finalizar: $erro')),
-      );
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Não foi possível finalizar o treino: $erro'),
+      ),
+    );
   }
+}
+
 
   Widget construirSerie(SerieExecutada serie) {
     final bloqueada = salvando || finalizando || sessao.finalizada;
@@ -4006,6 +4042,229 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class ResumoTreinoPage extends StatelessWidget {
+  final SessaoTreino sessao;
+
+  const ResumoTreinoPage({
+    super.key,
+    required this.sessao,
+  });
+
+  String formatarData(DateTime data) {
+    final d = data.toLocal();
+    String dois(int n) => n.toString().padLeft(2, '0');
+
+    return '${dois(d.day)}/${dois(d.month)}/${d.year} '
+        '${dois(d.hour)}:${dois(d.minute)}';
+  }
+
+  String formatarDuracao(Duration duracao) {
+    final horas = duracao.inHours;
+    final minutos = duracao.inMinutes.remainder(60);
+    final segundos = duracao.inSeconds.remainder(60);
+
+    if (horas > 0) {
+      return '${horas}h ${minutos}min';
+    }
+
+    if (minutos > 0) {
+      return '${minutos}min ${segundos}s';
+    }
+
+    return '${segundos}s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final total = sessao.series.length;
+    final concluidas = sessao.seriesConcluidas;
+    final percentual =
+        total == 0 ? 0 : (concluidas * 100 / total).round();
+
+    final fim = sessao.fim ?? DateTime.now();
+    final duracao = fim.difference(sessao.inicio);
+
+    final agrupadas = <String, List<SerieExecutada>>{};
+
+    for (final serie in sessao.series) {
+      agrupadas
+          .putIfAbsent(serie.exercicioId, () => [])
+          .add(serie);
+    }
+
+    final exerciciosConcluidos = agrupadas.values.where((series) {
+      return series.every((serie) => serie.concluida);
+    }).length;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Resumo do treino'),
+      ),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(18),
+          children: [
+            const Icon(
+              Icons.emoji_events_outlined,
+              size: 64,
+              color: verde,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Treino concluído!',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              sessao.nomeTreino,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: textoSecundario),
+            ),
+            const SizedBox(height: 24),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  children: [
+                    Text(
+                      '$percentual%',
+                      style: const TextStyle(
+                        fontSize: 38,
+                        fontWeight: FontWeight.bold,
+                        color: verde,
+                      ),
+                    ),
+                    const Text('Conclusão do treino'),
+                    const SizedBox(height: 16),
+                    LinearProgressIndicator(
+                      value: total == 0 ? 0 : concluidas / total,
+                      color: verde,
+                      backgroundColor: Colors.white12,
+                      minHeight: 8,
+                    ),
+                    const SizedBox(height: 20),
+                    _itemResumo('Séries concluídas', '$concluidas de $total'),
+                    _itemResumo(
+                      'Exercícios concluídos',
+                      '$exerciciosConcluidos de ${agrupadas.length}',
+                    ),
+                    _itemResumo('Duração', formatarDuracao(duracao)),
+                    _itemResumo('Início', formatarData(sessao.inicio)),
+                    _itemResumo('Término', formatarData(fim)),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Detalhamento por exercício',
+              style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 10),
+            ...agrupadas.entries.map((entrada) {
+              final series = entrada.value;
+              final feitas =
+                  series.where((serie) => serie.concluida).length;
+
+              return Card(
+                margin: const EdgeInsets.only(bottom: 10),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        series.first.nomeExercicio,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Text('$feitas de ${series.length} séries concluídas'),
+                      const Divider(),
+                      ...series.map((serie) {
+                        final carga = serie.cargaKg == 0
+                            ? 'Peso corporal / não informado'
+                            : '${serie.cargaKg.toStringAsFixed(
+                                serie.cargaKg % 1 == 0 ? 0 : 1,
+                              )} kg';
+
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            children: [
+                              Icon(
+                                serie.concluida
+                                    ? Icons.check_circle
+                                    : Icons.radio_button_unchecked,
+                                color: serie.concluida
+                                    ? verde
+                                    : textoSecundario,
+                                size: 19,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Série ${serie.numeroSerie} • '
+                                  '${serie.repeticoesRealizadas} rep. • $carga',
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+              );
+            }),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(context),
+              icon: const Icon(Icons.check),
+              label: const Text('Voltar ao aplicativo'),
+              style: FilledButton.styleFrom(
+                backgroundColor: verde,
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(vertical: 15),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _itemResumo(String titulo, String valor) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Text(
+              titulo,
+              style: const TextStyle(color: textoSecundario),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text(
+              valor,
+              textAlign: TextAlign.end,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
       ),
     );
   }

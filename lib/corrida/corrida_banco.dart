@@ -3,10 +3,7 @@ import 'dart:convert';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
-/// Registro imutável de uma corrida que foi concluída.
-///
-/// É usado pelo painel para somar corridas às demais atividades, sem criar
-/// uma sessão de musculação artificial no histórico de treinos.
+/// Registro de uma corrida concluída, usado pelos resumos do aplicativo.
 class CorridaConcluida {
   const CorridaConcluida({
     required this.id,
@@ -14,6 +11,8 @@ class CorridaConcluida {
     required this.fim,
     required this.duracaoSegundos,
     required this.distanciaMetros,
+    this.caloriasEstimadas = 0,
+    this.pesoKg,
   });
 
   final String id;
@@ -21,9 +20,12 @@ class CorridaConcluida {
   final DateTime fim;
   final int duracaoSegundos;
   final double distanciaMetros;
+  final double caloriasEstimadas;
+  final double? pesoKg;
 
   factory CorridaConcluida.fromRegistro(Map<String, Object?> registro) {
     final inicioMs = (registro['inicio_ms'] as num?)?.toInt();
+
     if (inicioMs == null) {
       throw FormatException('A corrida não possui data de início válida.');
     }
@@ -36,6 +38,9 @@ class CorridaConcluida {
       fim: DateTime.fromMillisecondsSinceEpoch(fimMs ?? inicioMs),
       duracaoSegundos: (registro['duracao_segundos'] as num?)?.toInt() ?? 0,
       distanciaMetros: (registro['distancia_metros'] as num?)?.toDouble() ?? 0,
+      caloriasEstimadas:
+          (registro['calorias_estimadas'] as num?)?.toDouble() ?? 0,
+      pesoKg: (registro['peso_kg'] as num?)?.toDouble(),
     );
   }
 }
@@ -43,7 +48,7 @@ class CorridaConcluida {
 class CorridaBanco {
   CorridaBanco._() : _caminhoBanco = null;
 
-  /// Construtor exclusivo para testes com banco separado.
+  /// Construtor para testes com banco de dados separado.
   CorridaBanco.paraTestes({required String caminho}) : _caminhoBanco = caminho;
 
   static final CorridaBanco instancia = CorridaBanco._();
@@ -51,6 +56,7 @@ class CorridaBanco {
   final String? _caminhoBanco;
 
   Database? _db;
+
   Future<Database> get database async {
     if (_db != null) return _db!;
 
@@ -60,7 +66,7 @@ class CorridaBanco {
 
     _db = await openDatabase(
       caminho,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE corridas (
@@ -70,9 +76,20 @@ class CorridaBanco {
             duracao_segundos INTEGER NOT NULL DEFAULT 0,
             distancia_metros REAL NOT NULL DEFAULT 0,
             estado TEXT NOT NULL,
-            rota_json TEXT NOT NULL DEFAULT '[]'
+            rota_json TEXT NOT NULL DEFAULT '[]',
+            calorias_estimadas REAL NOT NULL DEFAULT 0,
+            peso_kg REAL
           )
         ''');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute(
+            'ALTER TABLE corridas ADD COLUMN '
+            'calorias_estimadas REAL NOT NULL DEFAULT 0',
+          );
+          await db.execute('ALTER TABLE corridas ADD COLUMN peso_kg REAL');
+        }
       },
     );
 
@@ -90,35 +107,35 @@ class CorridaBanco {
       'distancia_metros': 0.0,
       'estado': 'em_andamento',
       'rota_json': '[]',
+      'calorias_estimadas': 0.0,
+      'peso_kg': null,
     });
   }
 
-  /// Remove somente uma sessão que não chegou a ser entregue ao serviço.
-  ///
-  /// Assim uma falha ao iniciar o serviço em primeiro plano não deixa uma
-  /// corrida vazia marcada como em andamento no próximo acesso ao aplicativo.
+  /// Remove uma sessão criada que não chegou a iniciar no serviço.
   Future<void> excluir(String id) async {
     final db = await database;
+
     await db.delete('corridas', where: 'id = ?', whereArgs: [id]);
   }
 
-  /// Exclui somente uma corrida já concluída.
-  ///
-  /// Corridas em andamento ou pausadas permanecem protegidas para que uma
-  /// ação no histórico não interrompa um registro ativo no GPS.
+  /// Exclui apenas corridas finalizadas.
   Future<bool> excluirFinalizada(String id) async {
     final db = await database;
+
     final removidas = await db.delete(
       'corridas',
       where: 'id = ? AND estado = ?',
       whereArgs: [id, 'finalizada'],
     );
+
     return removidas > 0;
   }
 
-  /// Remove somente o histórico de corridas concluídas.
+  /// Limpa apenas o histórico de corridas finalizadas.
   Future<int> limparFinalizadas() async {
     final db = await database;
+
     return db.delete(
       'corridas',
       where: 'estado = ?',
@@ -129,20 +146,20 @@ class CorridaBanco {
   Future<Map<String, Object?>?> buscar(String id) async {
     final db = await database;
 
-    final rows = await db.query(
+    final registros = await db.query(
       'corridas',
       where: 'id = ?',
       whereArgs: [id],
       limit: 1,
     );
 
-    return rows.isEmpty ? null : rows.first;
+    return registros.isEmpty ? null : registros.first;
   }
 
   Future<Map<String, Object?>?> buscarSessaoAberta() async {
     final db = await database;
 
-    final rows = await db.query(
+    final registros = await db.query(
       'corridas',
       where: 'estado IN (?, ?)',
       whereArgs: ['em_andamento', 'pausada'],
@@ -150,16 +167,18 @@ class CorridaBanco {
       limit: 1,
     );
 
-    return rows.isEmpty ? null : rows.first;
+    return registros.isEmpty ? null : registros.first;
   }
 
   Future<List<Map<String, Object?>>> listar() async {
     final db = await database;
+
     return db.query('corridas', orderBy: 'inicio_ms DESC');
   }
 
   Future<List<CorridaConcluida>> listarFinalizadas() async {
     final db = await database;
+
     final registros = await db.query(
       'corridas',
       where: 'estado = ?',
@@ -176,6 +195,8 @@ class CorridaBanco {
     required double distanciaMetros,
     required String estado,
     required List<Map<String, double>> rota,
+    double caloriasEstimadas = 0,
+    double? pesoKg,
     int? fimMs,
   }) async {
     final db = await database;
@@ -185,9 +206,10 @@ class CorridaBanco {
       'distancia_metros': distanciaMetros,
       'estado': estado,
       'rota_json': jsonEncode(rota),
+      'calorias_estimadas': caloriasEstimadas,
+      'peso_kg': pesoKg,
     };
 
-    // Só grava a data de finalização quando ela foi informada.
     if (fimMs != null) {
       valores['fim_ms'] = fimMs;
     }
@@ -199,9 +221,11 @@ class CorridaBanco {
     if (valor is! String || valor.isEmpty) return [];
 
     try {
-      final dados = jsonDecode(valor) as List<dynamic>;
+      final dados = jsonDecode(valor);
 
-      return dados.whereType<Map<String, dynamic>>().map((ponto) {
+      if (dados is! List) return [];
+
+      return dados.whereType<Map>().map((ponto) {
         return <String, double>{
           'lat': (ponto['lat'] as num).toDouble(),
           'lon': (ponto['lon'] as num).toDouble(),
@@ -212,7 +236,7 @@ class CorridaBanco {
     }
   }
 
-  /// Fecha a conexão aberta, principalmente para limpeza dos testes.
+  /// Fecha a conexão, principalmente para os testes.
   Future<void> fechar() async {
     final db = _db;
     _db = null;

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -6,6 +7,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../dados/workholy_banco.dart';
 import 'corrida_banco.dart';
 import 'corrida_servico.dart';
 import 'filtro_gps.dart';
@@ -31,12 +33,18 @@ class _CorridaPageState extends State<CorridaPage> {
 
   double _distancia = 0;
   int _duracao = 0;
+
+  double _caloriasEstimadas = 0;
+  double? _pesoKg;
+
   bool _carregando = false;
   bool _comandoEmAndamento = false;
   bool _mapaPronto = false;
   bool _seguirPosicao = true;
+
   LatLng? _posicaoAtual;
   double? _precisaoGps;
+
   String _mensagemGps = 'Aguardando o sinal do GPS.';
   Timer? _limiteDeConfirmacao;
 
@@ -58,6 +66,46 @@ class _CorridaPageState extends State<CorridaPage> {
     super.dispose();
   }
 
+  /// Lê o peso já salvo no perfil do praticante.
+  /// Não cria outro cadastro nem utiliza peso padrão.
+  Future<double?> _lerPesoPerfil() async {
+    try {
+      final texto = await WorkHolyBanco.instancia.lerTexto(
+        'workholy_perfil_praticante_v1',
+      );
+
+      if (texto == null || texto.trim().isEmpty) {
+        return null;
+      }
+
+      final decodificado = jsonDecode(texto);
+
+      if (decodificado is! Map) {
+        return null;
+      }
+
+      final valor = decodificado['peso'];
+
+      final double? peso;
+      if (valor is num) {
+        peso = valor.toDouble();
+      } else {
+        peso = double.tryParse(
+          valor?.toString().trim().replaceAll(',', '.') ?? '',
+        );
+      }
+
+      if (peso == null || !peso.isFinite || peso <= 0 || peso > 500) {
+        return null;
+      }
+
+      return peso;
+    } catch (erro) {
+      debugPrint('Não foi possível ler o peso do perfil: $erro');
+      return null;
+    }
+  }
+
   Future<void> _carregar() async {
     try {
       final historico = await CorridaBanco.instancia.listar();
@@ -71,6 +119,7 @@ class _CorridaPageState extends State<CorridaPage> {
 
       if (aberta != null) {
         final id = aberta['id'] as String;
+
         final rota = CorridaBanco.instancia
             .decodificarRota(aberta['rota_json'])
             .map((p) => LatLng(p['lat']!, p['lon']!))
@@ -78,10 +127,18 @@ class _CorridaPageState extends State<CorridaPage> {
 
         setState(() {
           _estado = aberta['estado'] as String;
-          _distancia = (aberta['distancia_metros'] as num).toDouble();
-          _duracao = aberta['duracao_segundos'] as int;
+          _distancia = (aberta['distancia_metros'] as num?)?.toDouble() ?? 0;
+          _duracao = (aberta['duracao_segundos'] as num?)?.toInt() ?? 0;
+
+          _caloriasEstimadas =
+              (aberta['calorias_estimadas'] as num?)?.toDouble() ?? 0;
+
+          _pesoKg = (aberta['peso_kg'] as num?)?.toDouble();
+
           _rota = rota;
-          if (rota.isNotEmpty) _posicaoAtual = rota.last;
+          if (rota.isNotEmpty) {
+            _posicaoAtual = rota.last;
+          }
         });
 
         await _garantirServico();
@@ -105,15 +162,18 @@ class _CorridaPageState extends State<CorridaPage> {
 
     if (tipo == 'erro') {
       _limiteDeConfirmacao?.cancel();
+
       setState(() {
         _erro = data['mensagem']?.toString() ?? 'Erro no GPS.';
         _carregando = false;
         _comandoEmAndamento = false;
       });
+
       return;
     }
 
     final novaRota = data['rota'];
+
     final List<LatLng>? pontos = novaRota is List
         ? novaRota.whereType<Map>().map((p) {
             return LatLng(
@@ -124,14 +184,20 @@ class _CorridaPageState extends State<CorridaPage> {
         : null;
 
     LatLng? novoPonto;
+
     final pontoRecebido = data['novo_ponto'];
+
     if (pontoRecebido is Map) {
       final lat = pontoRecebido['lat'];
       final lon = pontoRecebido['lon'];
+
       if (lat is num && lon is num) {
         novoPonto = LatLng(lat.toDouble(), lon.toDouble());
       }
     }
+
+    final caloriasRecebidas = data['calorias'];
+    final pesoRecebido = data['peso_kg'];
 
     setState(() {
       if (data['estado'] is String) {
@@ -144,6 +210,17 @@ class _CorridaPageState extends State<CorridaPage> {
 
       if (data['distancia'] is num) {
         _distancia = (data['distancia'] as num).toDouble();
+      }
+
+      if (caloriasRecebidas is num) {
+        _caloriasEstimadas = caloriasRecebidas.toDouble();
+      }
+
+      if (pesoRecebido is num) {
+        final peso = pesoRecebido.toDouble();
+        _pesoKg = peso.isFinite && peso > 0 && peso <= 500 ? peso : null;
+      } else {
+        _pesoKg = null;
       }
 
       if (pontos != null) {
@@ -229,6 +306,7 @@ class _CorridaPageState extends State<CorridaPage> {
 
     try {
       final excluida = await CorridaBanco.instancia.excluirFinalizada(id);
+
       if (!mounted) return;
 
       if (!excluida) {
@@ -241,6 +319,7 @@ class _CorridaPageState extends State<CorridaPage> {
       }
 
       await _atualizarHistorico();
+
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -248,6 +327,7 @@ class _CorridaPageState extends State<CorridaPage> {
       );
     } catch (erro) {
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Não foi possível excluir a corrida: $erro')),
       );
@@ -287,9 +367,11 @@ class _CorridaPageState extends State<CorridaPage> {
 
     try {
       final removidas = await CorridaBanco.instancia.limparFinalizadas();
+
       if (!mounted) return;
 
       await _atualizarHistorico();
+
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -299,6 +381,7 @@ class _CorridaPageState extends State<CorridaPage> {
       );
     } catch (erro) {
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Não foi possível limpar o histórico: $erro')),
       );
@@ -307,13 +390,16 @@ class _CorridaPageState extends State<CorridaPage> {
 
   void _programarLimiteDeConfirmacao() {
     _limiteDeConfirmacao?.cancel();
+
     _limiteDeConfirmacao = Timer(const Duration(seconds: 12), () {
       if (!mounted || (!_carregando && !_comandoEmAndamento)) return;
 
       setState(() {
         _carregando = false;
         _comandoEmAndamento = false;
-        _erro = 'O serviço de corrida não confirmou a ação. Verifique a notificação e tente novamente.';
+        _erro =
+            'O serviço de corrida não confirmou a ação. '
+            'Verifique a notificação e tente novamente.';
       });
     });
   }
@@ -388,11 +474,17 @@ class _CorridaPageState extends State<CorridaPage> {
     try {
       if (!await _prepararPermissoes()) return;
 
+      // Usa o peso já cadastrado no perfil do praticante.
+      final peso = await _lerPesoPerfil();
+
+      if (!mounted) return;
+
       final agora = DateTime.now().millisecondsSinceEpoch;
       final id = agora.toString();
 
       await CorridaBanco.instancia.criar(id, agora);
       idCriado = id;
+
       await _garantirServico();
 
       if (!mounted) return;
@@ -400,6 +492,9 @@ class _CorridaPageState extends State<CorridaPage> {
       setState(() {
         _distancia = 0;
         _duracao = 0;
+        _caloriasEstimadas = 0;
+        _pesoKg = peso;
+
         _rota = [];
         _posicaoAtual = null;
         _precisaoGps = null;
@@ -407,13 +502,21 @@ class _CorridaPageState extends State<CorridaPage> {
         _seguirPosicao = true;
       });
 
-      FlutterForegroundTask.sendDataToTask({'comando': 'iniciar', 'id': id});
+      // O serviço recebe o peso para calcular as calorias
+      // conforme os trechos de distância aceitos pelo filtro GPS.
+      FlutterForegroundTask.sendDataToTask({
+        'comando': 'iniciar',
+        'id': id,
+        'pesoKg': peso,
+      });
+
       comandoEnviado = true;
       _programarLimiteDeConfirmacao();
     } catch (e) {
       if (idCriado != null && !comandoEnviado) {
         await CorridaBanco.instancia.excluir(idCriado);
       }
+
       if (mounted) {
         setState(() => _erro = 'Não foi possível iniciar: $e');
       }
@@ -432,6 +535,7 @@ class _CorridaPageState extends State<CorridaPage> {
         _comandoEmAndamento = true;
         _erro = null;
       });
+
       FlutterForegroundTask.sendDataToTask({'comando': comando});
       _programarLimiteDeConfirmacao();
     } catch (e) {
@@ -449,6 +553,9 @@ class _CorridaPageState extends State<CorridaPage> {
       _estado = 'parada';
       _distancia = 0;
       _duracao = 0;
+      _caloriasEstimadas = 0;
+      _pesoKg = null;
+
       _rota = [];
       _posicaoAtual = null;
       _erro = null;
@@ -495,6 +602,19 @@ class _CorridaPageState extends State<CorridaPage> {
     final kmh = (_distancia / 1000) / (_duracao / 3600);
 
     return kmh.toStringAsFixed(1).replaceAll('.', ',');
+  }
+
+  String _caloriasFormatadas(double? calorias, double? peso) {
+    if (peso == null ||
+        !peso.isFinite ||
+        peso <= 0 ||
+        calorias == null ||
+        !calorias.isFinite ||
+        calorias < 0) {
+      return '-- kcal';
+    }
+
+    return '${calorias.round()} kcal';
   }
 
   @override
@@ -649,29 +769,39 @@ class _CorridaPageState extends State<CorridaPage> {
                   ),
                 ),
                 const SizedBox(height: 18),
-                Row(
+
+                // Métricas atuais da corrida.
+                Wrap(
+                  alignment: WrapAlignment.spaceAround,
+                  spacing: 20,
+                  runSpacing: 18,
                   children: [
-                    Expanded(
-                      child: _Metrica(
-                        titulo: 'DISTÂNCIA',
-                        valor: '${_distanciaFormatada(_distancia)} km',
-                      ),
+                    _Metrica(
+                      titulo: 'DISTÂNCIA',
+                      valor: '${_distanciaFormatada(_distancia)} km',
                     ),
-                    Expanded(
-                      child: _Metrica(
-                        titulo: 'RITMO MÉDIO',
-                        valor: '${_ritmo()} /km',
-                      ),
+                    _Metrica(titulo: 'RITMO MÉDIO', valor: '${_ritmo()} /km'),
+                    _Metrica(
+                      titulo: 'VELOCIDADE',
+                      valor: '${_velocidade()} km/h',
                     ),
-                    Expanded(
-                      child: _Metrica(
-                        titulo: 'VELOCIDADE',
-                        valor: '${_velocidade()} km/h',
-                      ),
+                    _Metrica(
+                      titulo: 'CALORIAS ESTIMADAS',
+                      valor: _caloriasFormatadas(_caloriasEstimadas, _pesoKg),
                     ),
                   ],
                 ),
                 const SizedBox(height: 18),
+                if (_pesoKg == null && (_emAndamento || _pausada))
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Cadastre seu peso no perfil para habilitar a estimativa '
+                      'de calorias na próxima corrida.',
+                      style: tema.textTheme.bodySmall,
+                    ),
+                  ),
+                const SizedBox(height: 8),
                 if (!_emAndamento && !_pausada && !_finalizada)
                   SizedBox(
                     width: double.infinity,
@@ -795,9 +925,14 @@ class _CorridaPageState extends State<CorridaPage> {
 
           final duracao = (corrida['duracao_segundos'] as num?)?.toInt() ?? 0;
 
+          final calorias = (corrida['calorias_estimadas'] as num?)?.toDouble();
+
+          final peso = (corrida['peso_kg'] as num?)?.toDouble();
+
           final estado = corrida['estado']?.toString() ?? 'desconhecido';
 
           final km = distancia / 1000;
+
           final ritmoSegundos = km > 0 && duracao > 0
               ? (duracao / km).round()
               : null;
@@ -911,6 +1046,10 @@ class _CorridaPageState extends State<CorridaPage> {
                         titulo: 'VELOCIDADE MÉDIA',
                         valor: '$velocidade km/h',
                       ),
+                      _Metrica(
+                        titulo: 'CALORIAS ESTIMADAS',
+                        valor: _caloriasFormatadas(calorias, peso),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -946,20 +1085,23 @@ class _Metrica extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(
-          titulo,
-          textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.labelSmall,
-        ),
-        const SizedBox(height: 6),
-        Text(
-          valor,
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-        ),
-      ],
+    return SizedBox(
+      width: 135,
+      child: Column(
+        children: [
+          Text(
+            titulo,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            valor,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
     );
   }
 }
