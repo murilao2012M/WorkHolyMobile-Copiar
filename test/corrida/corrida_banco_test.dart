@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:workholy_mobile/corrida/corrida_banco.dart';
+import 'package:workholy_mobile/sincronizacao/controle_alteracoes_sqlite.dart';
 
 void main() {
   late Directory diretorioTemporario;
@@ -45,6 +46,71 @@ void main() {
     expect(registro['estado'], 'em_andamento');
     expect(registro['fim_ms'], isNull);
   });
+
+  test(
+    'migração v3 preserva corrida e contador ao adicionar vínculo',
+    () async {
+      final caminho = p.join(diretorioTemporario.path, 'antigo.db');
+      final antigo = await openDatabase(
+        caminho,
+        version: 3,
+        onCreate: (db, version) async {
+          await db.execute('''
+          CREATE TABLE corridas (
+            id TEXT PRIMARY KEY, inicio_ms INTEGER NOT NULL, fim_ms INTEGER,
+            duracao_segundos INTEGER NOT NULL DEFAULT 0,
+            distancia_metros REAL NOT NULL DEFAULT 0, estado TEXT NOT NULL,
+            rota_json TEXT NOT NULL DEFAULT '[]',
+            calorias_estimadas REAL NOT NULL DEFAULT 0, peso_kg REAL
+          )
+        ''');
+          await ControleAlteracoesSqlite.criar(db, ['corridas']);
+          await db.insert('corridas', {
+            'id': 'antiga',
+            'inicio_ms': 1000,
+            'estado': 'finalizada',
+            'fim_ms': 2000,
+          });
+        },
+      );
+      final versaoAntes = await ControleAlteracoesSqlite.ler(antigo);
+      await antigo.close();
+      final migrado = CorridaBanco.paraTestes(caminho: caminho);
+      addTearDown(migrado.fechar);
+      expect((await migrado.buscar('antiga'))!['workfit_plano_id'], isNull);
+      expect(await migrado.versaoAlteracoes(), versaoAntes);
+      await migrado.criar('nova', 3000, workfitPlanoId: 'plano');
+      expect(await migrado.versaoAlteracoes(), greaterThan(versaoAntes));
+      await migrado.atualizar(
+        id: 'nova',
+        duracaoSegundos: 10,
+        distanciaMetros: 50,
+        estado: 'finalizada',
+        rota: const [],
+        fimMs: 4000,
+      );
+      await migrado.registrarRpe('nova', 8);
+      expect((await migrado.buscar('nova'))!['workfit_plano_id'], 'plano');
+      expect((await migrado.buscar('nova'))!['rpe'], 8);
+      expect((await migrado.listarFinalizadas()).first.workfitPlanoId, 'plano');
+      final exportado = await migrado.exportarDadosDoUsuario();
+      expect(
+        exportado.singleWhere(
+          (corrida) => corrida['id'] == 'nova',
+        )['workfit_plano_id'],
+        'plano',
+      );
+      expect(
+        exportado.singleWhere((corrida) => corrida['id'] == 'nova')['rpe'],
+        8,
+      );
+      await expectLater(migrado.registrarRpe('nova', 11), throwsArgumentError);
+      await expectLater(
+        migrado.registrarRpe('inexistente', 7),
+        throwsStateError,
+      );
+    },
+  );
 
   test('atualiza duraÃ§Ã£o, distÃ¢ncia, estado e rota', () async {
     await banco.criar('corrida-2', 1000);

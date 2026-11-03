@@ -1,0 +1,2214 @@
+﻿=== CONTEXTO PARA IMPLEMENTACAO DOS GRAFICOS ===
+
+
+========================================
+ARQUIVO: lib/corrida/corrida_page.dart
+========================================
+
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
+
+import '../dados/workholy_banco.dart';
+import '../exercicios/aviso_atividade_fisica.dart';
+import '../sincronizacao/sincronizacao_usuario.dart';
+import '../workfit/workfit_ciclo.dart';
+import '../workfit/workfit_selecao_corrida.dart';
+import '../workfit/workfit_esforco_dialog.dart';
+import 'corrida_banco.dart';
+import 'corrida_servico.dart';
+import 'filtro_gps.dart';
+
+class CorridaPage extends StatefulWidget {
+  const CorridaPage({
+    super.key,
+    this.onHistoricoAtualizado,
+    this.ciclosWorkFit = const [],
+  });
+
+  /// Notifica o painel quando o histÃ³rico de corridas muda.
+  final Future<void> Function()? onHistoricoAtualizado;
+  final List<WorkFitCiclo> ciclosWorkFit;
+
+  @override
+  State<CorridaPage> createState() => _CorridaPageState();
+}
+
+class _CorridaPageState extends State<CorridaPage> {
+  final MapController _mapController = MapController();
+
+  List<Map<String, Object?>> _historico = [];
+  List<LatLng> _rota = [];
+
+  String _estado = 'parada';
+  String? _erro;
+
+  double _distancia = 0;
+  int _duracao = 0;
+
+  double _caloriasEstimadas = 0;
+  double? _pesoKg;
+
+  bool _carregando = false;
+  bool _comandoEmAndamento = false;
+  bool _avisoCorridaAberto = false;
+  bool _selecionandoCiclo = false;
+  bool _mapaPronto = false;
+  bool _seguirPosicao = true;
+
+  LatLng? _posicaoAtual;
+  double? _precisaoGps;
+
+  String _mensagemGps = 'Aguardando o sinal do GPS.';
+  Timer? _limiteDeConfirmacao;
+  bool _finalizacaoProcessada = false;
+
+  bool get _emAndamento => _estado == 'em_andamento';
+  bool get _pausada => _estado == 'pausada';
+  bool get _finalizada => _estado == 'finalizada';
+
+  @override
+  void initState() {
+    super.initState();
+    FlutterForegroundTask.addTaskDataCallback(_receberDadosServico);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _carregar());
+  }
+
+  @override
+  void dispose() {
+    _limiteDeConfirmacao?.cancel();
+    FlutterForegroundTask.removeTaskDataCallback(_receberDadosServico);
+    super.dispose();
+  }
+
+  /// LÃª o peso jÃ¡ salvo no perfil do praticante.
+  /// NÃ£o cria outro cadastro nem utiliza peso padrÃ£o.
+  Future<double?> _lerPesoPerfil() async {
+    try {
+      final texto = await WorkHolyBanco.instancia.lerTexto(
+        'workholy_perfil_praticante_v1',
+      );
+
+      if (texto == null || texto.trim().isEmpty) {
+        return null;
+      }
+
+      final decodificado = jsonDecode(texto);
+
+      if (decodificado is! Map) {
+        return null;
+      }
+
+      final valor = decodificado['peso'];
+
+      final double? peso;
+      if (valor is num) {
+        peso = valor.toDouble();
+      } else {
+        peso = double.tryParse(
+          valor?.toString().trim().replaceAll(',', '.') ?? '',
+        );
+      }
+
+      if (peso == null || !peso.isFinite || peso <= 0 || peso > 500) {
+        return null;
+      }
+
+      return peso;
+    } catch (erro) {
+      debugPrint('NÃ£o foi possÃ­vel ler o peso do perfil: $erro');
+      return null;
+    }
+  }
+
+  Future<void> _carregar() async {
+    try {
+      final historico = await CorridaBanco.instancia.listar();
+      final aberta = await CorridaBanco.instancia.buscarSessaoAberta();
+
+      if (!mounted) return;
+
+      setState(() {
+        _historico = historico;
+      });
+
+      if (aberta != null) {
+        final id = aberta['id'] as String;
+
+        final rota = CorridaBanco.instancia
+            .decodificarRota(aberta['rota_json'])
+            .map((p) => LatLng(p['lat']!, p['lon']!))
+            .toList();
+
+        setState(() {
+          _estado = aberta['estado'] as String;
+          _distancia = (aberta['distancia_metros'] as num?)?.toDouble() ?? 0;
+          _duracao = (aberta['duracao_segundos'] as num?)?.toInt() ?? 0;
+
+          _caloriasEstimadas =
+              (aberta['calorias_estimadas'] as num?)?.toDouble() ?? 0;
+
+          _pesoKg = (aberta['peso_kg'] as num?)?.toDouble();
+
+          _rota = rota;
+          if (rota.isNotEmpty) {
+            _posicaoAtual = rota.last;
+          }
+        });
+
+        await _garantirServico();
+
+        FlutterForegroundTask.sendDataToTask({
+          'comando': 'restaurar',
+          'id': id,
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _erro = 'Erro ao carregar corridas: $e');
+      }
+    }
+  }
+
+  void _receberDadosServico(Object data) {
+    if (data is! Map || !mounted) return;
+
+    final tipo = data['tipo'];
+
+    if (tipo == 'erro') {
+      _limiteDeConfirmacao?.cancel();
+
+      setState(() {
+        _erro = data['mensagem']?.toString() ?? 'Erro no GPS.';
+        _carregando = false;
+        _comandoEmAndamento = false;
+      });
+
+      return;
+    }
+
+    final novaRota = data['rota'];
+
+    final List<LatLng>? pontos = novaRota is List
+        ? novaRota.whereType<Map>().map((p) {
+            return LatLng(
+              (p['lat'] as num).toDouble(),
+              (p['lon'] as num).toDouble(),
+            );
+          }).toList()
+        : null;
+
+    LatLng? novoPonto;
+
+    final pontoRecebido = data['novo_ponto'];
+
+    if (pontoRecebido is Map) {
+      final lat = pontoRecebido['lat'];
+      final lon = pontoRecebido['lon'];
+
+      if (lat is num && lon is num) {
+        novoPonto = LatLng(lat.toDouble(), lon.toDouble());
+      }
+    }
+
+    final caloriasRecebidas = data['calorias'];
+    final pesoRecebido = data['peso_kg'];
+
+    setState(() {
+      if (data['estado'] is String) {
+        _estado = data['estado'] as String;
+      }
+
+      if (data['duracao'] is num) {
+        _duracao = (data['duracao'] as num).toInt();
+      }
+
+      if (data['distancia'] is num) {
+        _distancia = (data['distancia'] as num).toDouble();
+      }
+
+      if (caloriasRecebidas is num) {
+        _caloriasEstimadas = caloriasRecebidas.toDouble();
+      }
+
+      if (pesoRecebido is num) {
+        final peso = pesoRecebido.toDouble();
+        _pesoKg = peso.isFinite && peso > 0 && peso <= 500 ? peso : null;
+      } else {
+        _pesoKg = null;
+      }
+
+      if (pontos != null) {
+        _rota = pontos;
+      } else if (novoPonto != null &&
+          (_rota.isEmpty || _rota.last != novoPonto)) {
+        _rota = [..._rota, novoPonto];
+      }
+
+      final lat = data['latitude'];
+      final lon = data['longitude'];
+
+      if (lat is num && lon is num) {
+        _posicaoAtual = LatLng(lat.toDouble(), lon.toDouble());
+      }
+
+      if (data['precisao_gps'] is num) {
+        _precisaoGps = (data['precisao_gps'] as num).toDouble();
+      }
+
+      if (data['mensagem_gps'] is String) {
+        _mensagemGps = data['mensagem_gps'] as String;
+      }
+
+      if (tipo == 'estado_confirmado' || tipo == 'finalizada') {
+        _limiteDeConfirmacao?.cancel();
+        _carregando = false;
+        _comandoEmAndamento = false;
+      }
+    });
+
+    if (_mapaPronto &&
+        _posicaoAtual != null &&
+        _emAndamento &&
+        _seguirPosicao) {
+      _mapController.move(_posicaoAtual!, 17);
+    }
+
+    if (tipo == 'finalizada') {
+      unawaited(_concluirNaInterface());
+    } else if (tipo == 'estado_confirmado') {
+      unawaited(_atualizarHistorico());
+    }
+  }
+
+  /// A corrida finalizada continua no banco/histÃ³rico, mas nÃ£o permanece como
+  /// sessÃ£o ativa na tela. Assim o prÃ³ximo toque em iniciar comeÃ§a limpo.
+  Future<void> _concluirNaInterface() async {
+    if (_finalizacaoProcessada) return;
+    _finalizacaoProcessada = true;
+    await _atualizarHistorico();
+    if (!mounted) return;
+
+    setState(() {
+      _estado = 'parada';
+      _distancia = 0;
+      _duracao = 0;
+      _caloriasEstimadas = 0;
+      _pesoKg = null;
+      _rota = [];
+      _posicaoAtual = null;
+      _precisaoGps = null;
+      _mensagemGps = 'Corrida salva. Pronto para uma nova atividade.';
+      _seguirPosicao = true;
+      _carregando = false;
+      _comandoEmAndamento = false;
+    });
+  }
+
+  Future<void> _atualizarHistorico({bool propagarErro = false}) async {
+    try {
+      final lista = await CorridaBanco.instancia.listar();
+
+      if (!mounted) return;
+
+      setState(() => _historico = lista);
+      SincronizacaoUsuario.instancia.agendarEnvio();
+      await widget.onHistoricoAtualizado?.call();
+    } catch (erro) {
+      debugPrint('Erro ao atualizar o histÃ³rico de corridas: $erro');
+      if (propagarErro) rethrow;
+    }
+  }
+
+  Future<void> _registrarEsforcoCorrida(Map<String, Object?> corrida) async {
+    final id = corrida['id'];
+    if (id is! String || id.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('NÃ£o foi possÃ­vel identificar a corrida.')),
+      );
+      return;
+    }
+    final esforco = await showDialog<EsforcoWorkFit>(
+      context: context,
+      builder: (_) => WorkFitEsforcoDialog(
+        permiteRir: false,
+        rpeInicial: corrida['rpe'] as int?,
+      ),
+    );
+    if (!mounted || esforco?.rpe == null) return;
+    try {
+      await CorridaBanco.instancia.registrarRpe(id, esforco!.rpe!);
+    } catch (erro) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('NÃ£o foi possÃ­vel registrar o esforÃ§o: $erro')),
+        );
+      }
+      return;
+    }
+    try {
+      await _atualizarHistorico(propagarErro: true);
+    } catch (erro) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('EsforÃ§o salvo, mas nÃ£o foi possÃ­vel atualizar o histÃ³rico: $erro')),
+        );
+      }
+      return;
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('EsforÃ§o da corrida registrado.')),
+      );
+    }
+  }
+
+  Future<void> _excluirCorridaFinalizada(Map<String, Object?> corrida) async {
+    final id = corrida['id']?.toString();
+    if (id == null || id.isEmpty) return;
+
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Excluir corrida?'),
+        content: const Text(
+          'A corrida e a rota GPS salva serÃ£o removidas do histÃ³rico. '
+          'Esta aÃ§Ã£o nÃ£o pode ser desfeita.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar != true || !mounted) return;
+
+    try {
+      final excluida = await CorridaBanco.instancia.excluirFinalizada(id);
+
+      if (!mounted) return;
+
+      if (!excluida) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Apenas corridas finalizadas podem ser excluÃ­das.'),
+          ),
+        );
+        return;
+      }
+
+      await _atualizarHistorico();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Corrida removida do histÃ³rico.')),
+      );
+    } catch (erro) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('NÃ£o foi possÃ­vel excluir a corrida: $erro')),
+      );
+    }
+  }
+
+  Future<void> _limparHistoricoDeCorridas() async {
+    final quantidade = _historico
+        .where((corrida) => corrida['estado'] == 'finalizada')
+        .length;
+
+    if (quantidade == 0) return;
+
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Limpar histÃ³rico de corridas?'),
+        content: Text(
+          'SerÃ£o removidas $quantidade corrida(s) finalizada(s), '
+          'incluindo as rotas GPS salvas. Corridas em andamento ou pausadas '
+          'serÃ£o preservadas. Esta aÃ§Ã£o nÃ£o pode ser desfeita.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Limpar histÃ³rico'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar != true || !mounted) return;
+
+    try {
+      final removidas = await CorridaBanco.instancia.limparFinalizadas();
+
+      if (!mounted) return;
+
+      await _atualizarHistorico();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$removidas corrida(s) removida(s) do histÃ³rico.'),
+        ),
+      );
+    } catch (erro) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('NÃ£o foi possÃ­vel limpar o histÃ³rico: $erro')),
+      );
+    }
+  }
+
+  void _programarLimiteDeConfirmacao() {
+    _limiteDeConfirmacao?.cancel();
+
+    _limiteDeConfirmacao = Timer(const Duration(seconds: 12), () {
+      if (!mounted || (!_carregando && !_comandoEmAndamento)) return;
+
+      setState(() {
+        _carregando = false;
+        _comandoEmAndamento = false;
+        _erro =
+            'O serviÃ§o de corrida nÃ£o confirmou a aÃ§Ã£o. '
+            'Verifique a notificaÃ§Ã£o e tente novamente.';
+      });
+    });
+  }
+
+  Future<bool> _prepararPermissoes() async {
+    if (!await Geolocator.isLocationServiceEnabled()) {
+      if (mounted) {
+        setState(() {
+          _erro = 'Ative o GPS do dispositivo antes de correr.';
+        });
+      }
+      return false;
+    }
+
+    var permissao = await Geolocator.checkPermission();
+
+    if (permissao == LocationPermission.denied) {
+      permissao = await Geolocator.requestPermission();
+    }
+
+    if (permissao == LocationPermission.denied ||
+        permissao == LocationPermission.deniedForever) {
+      if (mounted) {
+        setState(() {
+          _erro = permissao == LocationPermission.deniedForever
+              ? 'PermissÃ£o negada nas configuraÃ§Ãµes do Android.'
+              : 'A permissÃ£o de localizaÃ§Ã£o Ã© necessÃ¡ria para registrar a corrida.';
+        });
+      }
+      return false;
+    }
+
+    final notificacao =
+        await FlutterForegroundTask.checkNotificationPermission();
+
+    if (notificacao != NotificationPermission.granted) {
+      await FlutterForegroundTask.requestNotificationPermission();
+    }
+
+    return true;
+  }
+
+  Future<void> _garantirServico() async {
+    if (await FlutterForegroundTask.isRunningService) return;
+
+    final resultado = await FlutterForegroundTask.startService(
+      serviceId: 410,
+      serviceTypes: const [ForegroundServiceTypes.location],
+      notificationTitle: 'WorkHoly â€” Corrida',
+      notificationText: 'O registro da corrida estÃ¡ ativo.',
+      callback: iniciarServicoCorrida,
+    );
+
+    if (resultado is ServiceRequestFailure) {
+      throw StateError(
+        'NÃ£o foi possÃ­vel iniciar o serviÃ§o: ${resultado.error}',
+      );
+    }
+  }
+
+  Future<bool> _confirmarAvisoCorrida() async {
+    if (_avisoCorridaAberto || _carregando || _comandoEmAndamento) {
+      return false;
+    }
+    _avisoCorridaAberto = true;
+    try {
+      final continuar = await mostrarAvisoAtividadeFisica(context);
+      return mounted && continuar;
+    } finally {
+      _avisoCorridaAberto = false;
+    }
+  }
+
+  Future<void> _iniciarComAviso({bool limparAnterior = false}) async {
+    if (_selecionandoCiclo) return;
+    _selecionandoCiclo = true;
+    try {
+      if (!await _confirmarAvisoCorrida() || !mounted) return;
+      final ciclos = widget.ciclosWorkFit.where((ciclo) {
+        final estado = avaliarCicloWorkFit(ciclo, DateTime.now(), []);
+        return ciclo.modalidade == 'corrida' &&
+            !estado.encerrado &&
+            !estado.naoIniciado;
+      }).toList();
+      String? planoId;
+      if (ciclos.isNotEmpty) {
+        final selecao = await showDialog<SelecaoCicloCorrida>(
+          context: context,
+          builder: (_) => SelecaoCicloCorridaDialog(ciclos: ciclos),
+        );
+        if (!mounted || selecao == null) return;
+        planoId = selecao.planoId;
+      }
+      if (limparAnterior) {
+        setState(() {
+          _estado = 'parada';
+          _distancia = 0;
+          _duracao = 0;
+          _caloriasEstimadas = 0;
+          _pesoKg = null;
+          _rota = [];
+          _posicaoAtual = null;
+          _erro = null;
+          _precisaoGps = null;
+          _mensagemGps = 'Aguardando o sinal do GPS.';
+          _seguirPosicao = true;
+          _finalizacaoProcessada = false;
+        });
+      }
+      await _iniciar(workfitPlanoId: planoId);
+    } finally {
+      _selecionandoCiclo = false;
+    }
+  }
+
+  Future<void> _iniciar({String? workfitPlanoId}) async {
+    if (_carregando) return;
+
+    setState(() {
+      _finalizacaoProcessada = false;
+      _carregando = true;
+      _erro = null;
+    });
+
+    String? idCriado;
+    var comandoEnviado = false;
+
+    try {
+      if (!await _prepararPermissoes()) return;
+
+      // Usa o peso jÃ¡ cadastrado no perfil do praticante.
+      final peso = await _lerPesoPerfil();
+
+      if (!mounted) return;
+
+      final agora = DateTime.now().millisecondsSinceEpoch;
+      final id = agora.toString();
+
+      await CorridaBanco.instancia.criar(id, agora, workfitPlanoId: workfitPlanoId);
+      idCriado = id;
+
+      await _garantirServico();
+
+      if (!mounted) return;
+
+      setState(() {
+        _distancia = 0;
+        _duracao = 0;
+        _caloriasEstimadas = 0;
+        _pesoKg = peso;
+
+        _rota = [];
+        _posicaoAtual = null;
+        _precisaoGps = null;
+        _mensagemGps = 'Preparando o GPS para a corrida.';
+        _seguirPosicao = true;
+      });
+
+      // O serviÃ§o recebe o peso para calcular as calorias
+      // conforme os trechos de distÃ¢ncia aceitos pelo filtro GPS.
+      FlutterForegroundTask.sendDataToTask({
+        'comando': 'iniciar',
+        'id': id,
+        'pesoKg': peso,
+      });
+
+      comandoEnviado = true;
+      _programarLimiteDeConfirmacao();
+    } catch (e) {
+      if (idCriado != null && !comandoEnviado) {
+        await CorridaBanco.instancia.excluir(idCriado);
+      }
+
+      if (mounted) {
+        setState(() => _erro = 'NÃ£o foi possÃ­vel iniciar: $e');
+      }
+    } finally {
+      if (mounted && !comandoEnviado) {
+        setState(() => _carregando = false);
+      }
+    }
+  }
+
+  Future<void> _enviarComando(String comando) async {
+    if (_comandoEmAndamento || _carregando) return;
+
+    try {
+      setState(() {
+        _comandoEmAndamento = true;
+        _erro = null;
+      });
+
+      FlutterForegroundTask.sendDataToTask({'comando': comando});
+      _programarLimiteDeConfirmacao();
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _erro = 'Erro no comando da corrida: $e';
+          _comandoEmAndamento = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _novaCorrida() => _iniciarComAviso(limparAnterior: true);
+
+  String _tempo(int segundos) {
+    final h = segundos ~/ 3600;
+    final m = (segundos % 3600) ~/ 60;
+    final s = segundos % 60;
+
+    if (h > 0) {
+      return '${h.toString().padLeft(2, '0')}:'
+          '${m.toString().padLeft(2, '0')}:'
+          '${s.toString().padLeft(2, '0')}';
+    }
+
+    return '${m.toString().padLeft(2, '0')}:'
+        '${s.toString().padLeft(2, '0')}';
+  }
+
+  String _ritmo() {
+    final km = _distancia / 1000;
+
+    if (km < 0.05) return '--:--';
+
+    final segundos = (_duracao / km).round();
+
+    return '${segundos ~/ 60}:'
+        '${(segundos % 60).toString().padLeft(2, '0')}';
+  }
+
+  String _distanciaFormatada(double metros) =>
+      (metros / 1000).toStringAsFixed(2).replaceAll('.', ',');
+
+  String _velocidade() {
+    if (_duracao <= 0 || _distancia <= 0) return '0,0';
+
+    final kmh = (_distancia / 1000) / (_duracao / 3600);
+
+    return kmh.toStringAsFixed(1).replaceAll('.', ',');
+  }
+
+  String _caloriasFormatadas(double? calorias, double? peso) {
+    if (peso == null ||
+        !peso.isFinite ||
+        peso <= 0 ||
+        calorias == null ||
+        !calorias.isFinite ||
+        calorias < 0) {
+      return '-- kcal';
+    }
+
+    return '${calorias.round()} kcal';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tema = Theme.of(context);
+    final centro = _posicaoAtual ?? const LatLng(-23.5505, -46.6333);
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Text(
+          'Corrida',
+          style: tema.textTheme.headlineMedium?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Registre seu trajeto, acompanhe as mÃ©tricas e salve seu histÃ³rico.',
+          style: tema.textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 16),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: SizedBox(
+            height: 300,
+            child: FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(
+                initialCenter: centro,
+                initialZoom: 14,
+                onMapReady: () => _mapaPronto = true,
+                onPositionChanged: (_, hasGesture) {
+                  if (hasGesture && _seguirPosicao) {
+                    setState(() => _seguirPosicao = false);
+                  }
+                },
+              ),
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'br.com.workholyia.workholy_mobile',
+                ),
+                if (_rota.length >= 2)
+                  PolylineLayer(
+                    polylines: [
+                      Polyline(
+                        points: _rota,
+                        strokeWidth: 5,
+                        color: tema.colorScheme.primary,
+                      ),
+                    ],
+                  ),
+                if (_posicaoAtual != null)
+                  MarkerLayer(
+                    markers: [
+                      Marker(
+                        point: _posicaoAtual!,
+                        width: 44,
+                        height: 44,
+                        child: Icon(
+                          Icons.my_location,
+                          size: 34,
+                          color: tema.colorScheme.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                RichAttributionWidget(
+                  attributions: [
+                    TextSourceAttribution('Â© OpenStreetMap contributors'),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_posicaoAtual != null)
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: () {
+                setState(() => _seguirPosicao = true);
+                _mapController.move(_posicaoAtual!, 17);
+              },
+              icon: Icon(_seguirPosicao ? Icons.gps_fixed : Icons.my_location),
+              label: Text(
+                _seguirPosicao ? 'Seguindo sua posiÃ§Ã£o' : 'Centralizar mapa',
+              ),
+            ),
+          ),
+        const SizedBox(height: 16),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              children: [
+                Text(
+                  _carregando
+                      ? 'PREPARANDO CORRIDA'
+                      : _comandoEmAndamento
+                      ? 'SALVANDO ALTERAÃ‡ÃƒO'
+                      : _finalizada
+                      ? 'CORRIDA FINALIZADA'
+                      : _pausada
+                      ? 'CORRIDA PAUSADA'
+                      : _emAndamento
+                      ? 'CORRIDA EM ANDAMENTO'
+                      : 'PRONTO PARA CORRER',
+                  style: tema.textTheme.labelLarge,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _tempo(_duracao),
+                  style: tema.textTheme.displaySmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    fontFeatures: const [],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color:
+                        (_precisaoGps ?? double.infinity) <=
+                            FiltroGpsCorrida.precisaoMaximaMetros
+                        ? tema.colorScheme.primaryContainer
+                        : tema.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        (_precisaoGps ?? double.infinity) <=
+                                FiltroGpsCorrida.precisaoMaximaMetros
+                            ? Icons.gps_fixed
+                            : Icons.gps_not_fixed,
+                        size: 19,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _mensagemGps,
+                          style: tema.textTheme.bodySmall,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 18),
+
+                // MÃ©tricas atuais da corrida.
+                Wrap(
+                  alignment: WrapAlignment.spaceAround,
+                  spacing: 20,
+                  runSpacing: 18,
+                  children: [
+                    _Metrica(
+                      titulo: 'DISTÃ‚NCIA',
+                      valor: '${_distanciaFormatada(_distancia)} km',
+                    ),
+                    _Metrica(titulo: 'RITMO MÃ‰DIO', valor: '${_ritmo()} /km'),
+                    _Metrica(
+                      titulo: 'VELOCIDADE',
+                      valor: '${_velocidade()} km/h',
+                    ),
+                    _Metrica(
+                      titulo: 'CALORIAS ESTIMADAS',
+                      valor: _caloriasFormatadas(_caloriasEstimadas, _pesoKg),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                if (_pesoKg == null && (_emAndamento || _pausada))
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Cadastre seu peso no perfil para habilitar a estimativa '
+                      'de calorias na prÃ³xima corrida.',
+                      style: tema.textTheme.bodySmall,
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                if (!_emAndamento && !_pausada && !_finalizada)
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _carregando || _comandoEmAndamento
+                          ? null
+                          : _iniciarComAviso,
+                      icon: const Icon(Icons.play_arrow),
+                      label: Text(
+                        _carregando ? 'Preparando...' : 'Iniciar corrida',
+                      ),
+                    ),
+                  ),
+                if (_emAndamento) ...[
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _comandoEmAndamento
+                          ? null
+                          : () => _enviarComando('pausar'),
+                      icon: const Icon(Icons.pause),
+                      label: const Text('Pausar'),
+                    ),
+                  ),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _comandoEmAndamento
+                          ? null
+                          : () => _enviarComando('finalizar'),
+                      icon: const Icon(Icons.stop),
+                      label: const Text('Finalizar corrida'),
+                    ),
+                  ),
+                ],
+                if (_pausada) ...[
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _comandoEmAndamento
+                          ? null
+                          : () => _enviarComando('retomar'),
+                      icon: const Icon(Icons.play_arrow),
+                      label: const Text('Retomar corrida'),
+                    ),
+                  ),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _comandoEmAndamento
+                          ? null
+                          : () => _enviarComando('finalizar'),
+                      icon: const Icon(Icons.stop),
+                      label: const Text('Finalizar corrida'),
+                    ),
+                  ),
+                ],
+                if (_finalizada)
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _novaCorrida,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Nova corrida'),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        if (_erro != null) ...[
+          const SizedBox(height: 12),
+          Card(
+            color: tema.colorScheme.errorContainer,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text(
+                _erro!,
+                style: TextStyle(color: tema.colorScheme.onErrorContainer),
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: 24),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'HistÃ³rico de corridas',
+                style: tema.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            if (_historico.any((corrida) => corrida['estado'] == 'finalizada'))
+              IconButton(
+                tooltip: 'Limpar histÃ³rico de corridas',
+                onPressed: _limparHistoricoDeCorridas,
+                icon: const Icon(
+                  Icons.delete_sweep_outlined,
+                  color: Colors.redAccent,
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (_historico.isEmpty)
+          const Card(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Suas corridas salvas aparecerÃ£o aqui.'),
+            ),
+          ),
+        ..._historico.map((corrida) {
+          final inicio = DateTime.fromMillisecondsSinceEpoch(
+            (corrida['inicio_ms'] as num).toInt(),
+          ).toLocal();
+
+          final distancia =
+              (corrida['distancia_metros'] as num?)?.toDouble() ?? 0.0;
+
+          final duracao = (corrida['duracao_segundos'] as num?)?.toInt() ?? 0;
+
+          final calorias = (corrida['calorias_estimadas'] as num?)?.toDouble();
+
+          final peso = (corrida['peso_kg'] as num?)?.toDouble();
+
+          final estado = corrida['estado']?.toString() ?? 'desconhecido';
+
+          final km = distancia / 1000;
+
+          final ritmoSegundos = km > 0 && duracao > 0
+              ? (duracao / km).round()
+              : null;
+
+          final ritmo = ritmoSegundos == null
+              ? '--:--'
+              : '${ritmoSegundos ~/ 60}:'
+                    '${(ritmoSegundos % 60).toString().padLeft(2, '0')}';
+
+          final velocidade = duracao > 0 && km > 0
+              ? (km / (duracao / 3600)).toStringAsFixed(1).replaceAll('.', ',')
+              : '0,0';
+
+          final data =
+              '${inicio.day.toString().padLeft(2, '0')}/'
+              '${inicio.month.toString().padLeft(2, '0')}/'
+              '${inicio.year}';
+
+          final hora =
+              '${inicio.hour.toString().padLeft(2, '0')}:'
+              '${inicio.minute.toString().padLeft(2, '0')}';
+
+          final estadoFormatado = switch (estado) {
+            'finalizada' => 'Finalizada',
+            'em_andamento' => 'Em andamento',
+            'pausada' => 'Pausada',
+            _ => estado,
+          };
+
+          final rotaSalva = CorridaBanco.instancia
+              .decodificarRota(corrida['rota_json'])
+              .map((p) => LatLng(p['lat']!, p['lon']!))
+              .toList();
+
+          return Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.directions_run,
+                        size: 30,
+                        color: tema.colorScheme.primary,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${_distanciaFormatada(distancia)} km',
+                              style: tema.textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              '$data Ã s $hora',
+                              style: tema.textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Ver rota salva',
+                        icon: const Icon(Icons.map_outlined),
+                        onPressed: () {
+                          if (rotaSalva.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Esta corrida nÃ£o tem pontos GPS salvos.',
+                                ),
+                              ),
+                            );
+                            return;
+                          }
+
+                          setState(() {
+                            _rota = rotaSalva;
+                            _posicaoAtual = rotaSalva.last;
+                          });
+
+                          if (_mapaPronto) {
+                            _mapController.move(rotaSalva.last, 16);
+                          }
+                        },
+                      ),
+                      if (estado == 'finalizada')
+                        IconButton(
+                          tooltip: 'Registrar esforÃ§o da corrida',
+                          icon: const Icon(Icons.speed),
+                          onPressed: () => _registrarEsforcoCorrida(corrida),
+                        ),
+                      if (estado == 'finalizada')
+                        IconButton(
+                          tooltip: 'Excluir corrida',
+                          icon: const Icon(
+                            Icons.delete_outline,
+                            color: Colors.redAccent,
+                          ),
+                          onPressed: () => _excluirCorridaFinalizada(corrida),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 20,
+                    runSpacing: 14,
+                    children: [
+                      _Metrica(titulo: 'DURAÃ‡ÃƒO', valor: _tempo(duracao)),
+                      _Metrica(titulo: 'RITMO MÃ‰DIO', valor: '$ritmo /km'),
+                      _Metrica(
+                        titulo: 'VELOCIDADE MÃ‰DIA',
+                        valor: '$velocidade km/h',
+                      ),
+                      _Metrica(
+                        titulo: 'CALORIAS ESTIMADAS',
+                        valor: _caloriasFormatadas(calorias, peso),
+                      ),
+                      if (corrida['rpe'] != null)
+                        _Metrica(titulo: 'RPE', valor: '${corrida['rpe']}'),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Chip(
+                      avatar: Icon(
+                        estado == 'finalizada'
+                            ? Icons.check_circle_outline
+                            : estado == 'pausada'
+                            ? Icons.pause_circle_outline
+                            : Icons.info_outline,
+                        size: 18,
+                      ),
+                      label: Text(estadoFormatado),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+}
+
+class _Metrica extends StatelessWidget {
+  const _Metrica({required this.titulo, required this.valor});
+
+  final String titulo;
+  final String valor;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 135,
+      child: Column(
+        children: [
+          Text(
+            titulo,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            valor,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+
+========================================
+ARQUIVO: lib/corrida/corrida_banco.dart
+========================================
+
+import 'dart:convert';
+
+import 'package:path/path.dart' as p;
+import 'package:sqflite/sqflite.dart';
+
+import '../sincronizacao/controle_alteracoes_sqlite.dart';
+
+/// Registro de uma corrida concluÃ­da, usado pelos resumos do aplicativo.
+class CorridaConcluida {
+  const CorridaConcluida({
+    required this.id,
+    required this.inicio,
+    required this.fim,
+    required this.duracaoSegundos,
+    required this.distanciaMetros,
+    this.caloriasEstimadas = 0,
+    this.pesoKg,
+    this.workfitPlanoId,
+    this.rpe,
+  });
+
+  final String id;
+  final DateTime inicio;
+  final DateTime fim;
+  final int duracaoSegundos;
+  final double distanciaMetros;
+  final double caloriasEstimadas;
+  final double? pesoKg;
+  final String? workfitPlanoId;
+  final int? rpe;
+
+  factory CorridaConcluida.fromRegistro(Map<String, Object?> registro) {
+    final inicioMs = (registro['inicio_ms'] as num?)?.toInt();
+
+    if (inicioMs == null) {
+      throw FormatException('A corrida nÃ£o possui data de inÃ­cio vÃ¡lida.');
+    }
+
+    final fimMs = (registro['fim_ms'] as num?)?.toInt();
+
+    return CorridaConcluida(
+      id: registro['id']?.toString() ?? '',
+      inicio: DateTime.fromMillisecondsSinceEpoch(inicioMs),
+      fim: DateTime.fromMillisecondsSinceEpoch(fimMs ?? inicioMs),
+      duracaoSegundos: (registro['duracao_segundos'] as num?)?.toInt() ?? 0,
+      distanciaMetros: (registro['distancia_metros'] as num?)?.toDouble() ?? 0,
+      caloriasEstimadas:
+          (registro['calorias_estimadas'] as num?)?.toDouble() ?? 0,
+      pesoKg: (registro['peso_kg'] as num?)?.toDouble(),
+      workfitPlanoId: registro['workfit_plano_id'] as String?,
+      rpe: registro['rpe'] as int?,
+    );
+  }
+}
+
+class CorridaBanco {
+  CorridaBanco._() : _caminhoBanco = null;
+
+  /// Construtor para testes com banco de dados separado.
+  CorridaBanco.paraTestes({required String caminho}) : _caminhoBanco = caminho;
+
+  static final CorridaBanco instancia = CorridaBanco._();
+
+  final String? _caminhoBanco;
+
+  Database? _db;
+
+  Future<Database> get database async {
+    if (_db != null) return _db!;
+
+    final caminho =
+        _caminhoBanco ??
+        p.join(await getDatabasesPath(), 'workholy_corridas.db');
+
+    _db = await openDatabase(
+      caminho,
+      version: 4,
+      onCreate: (db, version) async {
+        await db.execute('''
+          CREATE TABLE corridas (
+            id TEXT PRIMARY KEY,
+            inicio_ms INTEGER NOT NULL,
+            fim_ms INTEGER,
+            duracao_segundos INTEGER NOT NULL DEFAULT 0,
+            distancia_metros REAL NOT NULL DEFAULT 0,
+            estado TEXT NOT NULL,
+            rota_json TEXT NOT NULL DEFAULT '[]',
+            calorias_estimadas REAL NOT NULL DEFAULT 0,
+            peso_kg REAL,
+            workfit_plano_id TEXT,
+            rpe INTEGER CHECK (rpe IS NULL OR rpe BETWEEN 1 AND 10)
+          )
+        ''');
+        await ControleAlteracoesSqlite.criar(db, ['corridas']);
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute(
+            'ALTER TABLE corridas ADD COLUMN '
+            'calorias_estimadas REAL NOT NULL DEFAULT 0',
+          );
+          await db.execute('ALTER TABLE corridas ADD COLUMN peso_kg REAL');
+        }
+        if (oldVersion < 3) {
+          await ControleAlteracoesSqlite.criar(db, ['corridas']);
+        }
+        if (oldVersion < 4) {
+          await db.execute(
+            'ALTER TABLE corridas ADD COLUMN workfit_plano_id TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE corridas ADD COLUMN rpe INTEGER '
+            'CHECK (rpe IS NULL OR rpe BETWEEN 1 AND 10)',
+          );
+        }
+      },
+    );
+
+    return _db!;
+  }
+
+  Future<int> versaoAlteracoes() async =>
+      ControleAlteracoesSqlite.ler(await database);
+
+  Future<void> criar(String id, int inicioMs, {String? workfitPlanoId}) async {
+    if (workfitPlanoId != null && workfitPlanoId.trim().isEmpty) {
+      throw ArgumentError.value(workfitPlanoId, 'workfitPlanoId');
+    }
+    final db = await database;
+
+    await db.insert('corridas', {
+      'id': id,
+      'inicio_ms': inicioMs,
+      'fim_ms': null,
+      'duracao_segundos': 0,
+      'distancia_metros': 0.0,
+      'estado': 'em_andamento',
+      'rota_json': '[]',
+      'calorias_estimadas': 0.0,
+      'peso_kg': null,
+      'workfit_plano_id': workfitPlanoId,
+    });
+  }
+
+  /// Remove uma sessÃ£o criada que nÃ£o chegou a iniciar no serviÃ§o.
+  Future<void> excluir(String id) async {
+    final db = await database;
+
+    await db.delete('corridas', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Exclui apenas corridas finalizadas.
+  Future<bool> excluirFinalizada(String id) async {
+    final db = await database;
+
+    final removidas = await db.delete(
+      'corridas',
+      where: 'id = ? AND estado = ?',
+      whereArgs: [id, 'finalizada'],
+    );
+
+    return removidas > 0;
+  }
+
+  /// Limpa apenas o histÃ³rico de corridas finalizadas.
+  Future<int> limparFinalizadas() async {
+    final db = await database;
+
+    return db.delete(
+      'corridas',
+      where: 'estado = ?',
+      whereArgs: ['finalizada'],
+    );
+  }
+
+  Future<Map<String, Object?>?> buscar(String id) async {
+    final db = await database;
+
+    final registros = await db.query(
+      'corridas',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+
+    return registros.isEmpty ? null : registros.first;
+  }
+
+  Future<Map<String, Object?>?> buscarSessaoAberta() async {
+    final db = await database;
+
+    final registros = await db.query(
+      'corridas',
+      where: 'estado IN (?, ?)',
+      whereArgs: ['em_andamento', 'pausada'],
+      orderBy: 'inicio_ms DESC',
+      limit: 1,
+    );
+
+    return registros.isEmpty ? null : registros.first;
+  }
+
+  Future<List<Map<String, Object?>>> listar() async {
+    final db = await database;
+
+    return db.query('corridas', orderBy: 'inicio_ms DESC');
+  }
+
+  /// Registros no formato seguro para a sincronizaÃ§Ã£o por conta.
+  Future<List<Map<String, dynamic>>> exportarDadosDoUsuario() async {
+    return (await exportarDadosDoUsuarioComVersao()).dados;
+  }
+
+  /// A versÃ£o e os dados sÃ£o lidos na mesma transaÃ§Ã£o deste banco.
+  Future<SnapshotLocal<List<Map<String, dynamic>>>>
+  exportarDadosDoUsuarioComVersao() async {
+    final db = await database;
+    return db.transaction((txn) async {
+      final versao = await ControleAlteracoesSqlite.ler(txn);
+      final registros = await txn.query('corridas', orderBy: 'inicio_ms DESC');
+      return SnapshotLocal(
+        versao: versao,
+        dados: registros
+            .map((registro) => Map<String, dynamic>.from(registro))
+            .toList(),
+      );
+    });
+  }
+
+  /// Troca o cache local pelas corridas pertencentes Ã  conta autenticada.
+  Future<void> importarDadosDoUsuario(
+    List<Map<String, dynamic>> corridas,
+  ) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('corridas');
+      for (final corrida in corridas) {
+        final id = corrida['id']?.toString().trim() ?? '';
+        if (id.isEmpty) continue;
+        await txn.insert('corridas', {
+          'id': id,
+          'inicio_ms': (corrida['inicio_ms'] as num?)?.toInt() ?? 0,
+          'fim_ms': (corrida['fim_ms'] as num?)?.toInt(),
+          'duracao_segundos':
+              (corrida['duracao_segundos'] as num?)?.toInt() ?? 0,
+          'distancia_metros':
+              (corrida['distancia_metros'] as num?)?.toDouble() ?? 0,
+          'estado': corrida['estado']?.toString() ?? 'finalizada',
+          'rota_json': corrida['rota_json']?.toString() ?? '[]',
+          'calorias_estimadas':
+              (corrida['calorias_estimadas'] as num?)?.toDouble() ?? 0,
+          'peso_kg': (corrida['peso_kg'] as num?)?.toDouble(),
+          'workfit_plano_id': corrida['workfit_plano_id'] as String?,
+          'rpe': corrida['rpe'] as int?,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    });
+  }
+
+  Future<void> limparDadosDoUsuario() async {
+    final db = await database;
+    await db.delete('corridas');
+  }
+
+  Future<List<CorridaConcluida>> listarFinalizadas() async {
+    final db = await database;
+
+    final registros = await db.query(
+      'corridas',
+      where: 'estado = ?',
+      whereArgs: const ['finalizada'],
+      orderBy: 'inicio_ms DESC',
+    );
+
+    return registros.map(CorridaConcluida.fromRegistro).toList();
+  }
+
+  Future<void> registrarRpe(String id, int rpe) async {
+    if (rpe < 1 || rpe > 10) {
+      throw ArgumentError.value(rpe, 'rpe', 'Deve estar entre 1 e 10.');
+    }
+    final db = await database;
+    final alteradas = await db.update(
+      'corridas',
+      {'rpe': rpe},
+      where: 'id = ? AND estado = ?',
+      whereArgs: [id, 'finalizada'],
+    );
+    if (alteradas != 1) {
+      throw StateError('A corrida finalizada nÃ£o foi encontrada.');
+    }
+  }
+
+  Future<void> atualizar({
+    required String id,
+    required int duracaoSegundos,
+    required double distanciaMetros,
+    required String estado,
+    required List<Map<String, double>> rota,
+    double caloriasEstimadas = 0,
+    double? pesoKg,
+    int? fimMs,
+  }) async {
+    final db = await database;
+
+    final valores = <String, Object?>{
+      'duracao_segundos': duracaoSegundos,
+      'distancia_metros': distanciaMetros,
+      'estado': estado,
+      'rota_json': jsonEncode(rota),
+      'calorias_estimadas': caloriasEstimadas,
+      'peso_kg': pesoKg,
+    };
+
+    if (fimMs != null) {
+      valores['fim_ms'] = fimMs;
+    }
+
+    await db.update('corridas', valores, where: 'id = ?', whereArgs: [id]);
+  }
+
+  List<Map<String, double>> decodificarRota(Object? valor) {
+    if (valor is! String || valor.isEmpty) return [];
+
+    try {
+      final dados = jsonDecode(valor);
+
+      if (dados is! List) return [];
+
+      return dados.whereType<Map>().map((ponto) {
+        return <String, double>{
+          'lat': (ponto['lat'] as num).toDouble(),
+          'lon': (ponto['lon'] as num).toDouble(),
+        };
+      }).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Fecha a conexÃ£o, principalmente para os testes.
+  Future<void> fechar() async {
+    final db = _db;
+    _db = null;
+
+    if (db != null) {
+      await db.close();
+    }
+  }
+}
+
+
+
+========================================
+ARQUIVO: lib/corrida/corrida_servico.dart
+========================================
+
+import 'dart:async';
+
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:geolocator/geolocator.dart';
+
+import 'corrida_banco.dart';
+import 'filtro_gps.dart';
+
+@pragma('vm:entry-point')
+void iniciarServicoCorrida() {
+  FlutterForegroundTask.setTaskHandler(CorridaTaskHandler());
+}
+
+class CorridaTaskHandler extends TaskHandler {
+  static const _intervaloMinimoDePersistencia = Duration(seconds: 15);
+  static const _distanciaMinimaDePersistencia = 30.0;
+
+  StreamSubscription<Position>? _gps;
+
+  String? _id;
+  String _estado = 'parada';
+  final List<Map<String, double>> _rota = [];
+
+  PontoGps? _ultimoPontoAceito;
+  double? _precisaoGps;
+  String _mensagemGps = 'Aguardando o sinal do GPS.';
+
+  double _distancia = 0;
+  int _duracaoSegundos = 0;
+  double _caloriasEstimadas = 0;
+  double? _pesoKg;
+  //Velocidade suavizada para reduzir oscilaÃ§Ãµes provocados pelo GPS
+  double? _velocidadeSuavizadaMps;
+  int _tempoAcumuladoMs = 0;
+  int? _inicioTrechoMs;
+
+  Future<void> _filaDePersistencia = Future.value();
+  Future<void> _filaDeComandos = Future.value();
+  int _salvamentosPendentes = 0;
+  int _ultimoSalvamentoMs = 0;
+  double _distanciaNoUltimoSalvamento = 0;
+
+  /// Calcula o gasto energÃ©tico de um trecho utilizando a velocidade
+  /// de deslocamento, o peso corporal e o tempo decorrido.
+  ///
+  /// Modelo fisiolÃ³gico simplificado baseado na equaÃ§Ã£o de corrida ACSM.
+  /// O resultado representa quilocalorias estimadas (gasto bruto).
+  double _calcularCaloriasDoTrecho({
+    required double distanciaMetros,
+    required double intervaloSegundos,
+  }) {
+    final peso = _pesoKg;
+
+    if (peso == null ||
+        !peso.isFinite ||
+        peso <= 0 ||
+        !distanciaMetros.isFinite ||
+        distanciaMetros <= 0 ||
+        !intervaloSegundos.isFinite ||
+        intervaloSegundos <= 0) {
+      return 0;
+    }
+
+    // Velocidade mÃ©dia do trecho em metros por segundo.
+    final velocidadeMps = distanciaMetros / intervaloSegundos;
+
+    if (!velocidadeMps.isFinite ||
+        velocidadeMps <= 0 ||
+        velocidadeMps > FiltroGpsCorrida.velocidadeMaximaMetrosPorSegundo) {
+      return 0;
+    }
+
+    // SuavizaÃ§Ã£o exponencial para reduzir variaÃ§Ãµes do GPS.
+    const fatorSuavizacao = 0.35;
+
+    final velocidadeAnterior = _velocidadeSuavizadaMps;
+
+    _velocidadeSuavizadaMps = velocidadeAnterior == null
+        ? velocidadeMps
+        : velocidadeAnterior +
+              fatorSuavizacao * (velocidadeMps - velocidadeAnterior);
+
+    // ConversÃ£o de m/s para m/min.
+    final velocidadeMetrosPorMinuto = _velocidadeSuavizadaMps! * 60;
+
+    // EquaÃ§Ã£o simplificada de consumo de oxigÃªnio para corrida plana.
+    final vo2 = 3.5 + (0.2 * velocidadeMetrosPorMinuto);
+
+    // ConversÃ£o do consumo estimado em kcal/min.
+    final caloriasPorMinuto = (vo2 * peso) / 200;
+
+    // Integra o gasto durante o intervalo GPS.
+    final caloriasDoTrecho = caloriasPorMinuto * (intervaloSegundos / 60);
+
+    if (!caloriasDoTrecho.isFinite || caloriasDoTrecho < 0) {
+      return 0;
+    }
+
+    return caloriasDoTrecho;
+  }
+
+  Future<void> _restaurar(String id) async {
+    // Evita reiniciar o cronÃ´metro e o GPS ao restaurar
+    // novamente a sessÃ£o que jÃ¡ estÃ¡ carregada.
+    if (_id == id && (_estado == 'em_andamento' || _estado == 'pausada')) {
+      _enviarEstado(tipo: 'estado_confirmado', incluirRota: true);
+      return;
+    }
+
+    // NÃ£o permite substituir silenciosamente outra sessÃ£o ativa.
+    if (_id != null &&
+        _id != id &&
+        (_estado == 'em_andamento' || _estado == 'pausada')) {
+      throw StateError('JÃ¡ existe outra corrida carregada neste serviÃ§o.');
+    }
+
+    final registro = await CorridaBanco.instancia.buscar(id);
+    if (registro == null) return;
+
+    _id = id;
+    _estado = registro['estado'] as String;
+    _distancia = (registro['distancia_metros'] as num).toDouble();
+    _duracaoSegundos = registro['duracao_segundos'] as int;
+    _caloriasEstimadas =
+        (registro['calorias_estimadas'] as num?)?.toDouble() ?? 0.0;
+    _pesoKg = (registro['peso_kg'] as num?)?.toDouble();
+    _tempoAcumuladoMs = _duracaoSegundos * 1000;
+    _ultimoSalvamentoMs = DateTime.now().millisecondsSinceEpoch;
+    _distanciaNoUltimoSalvamento = _distancia;
+
+    _rota
+      ..clear()
+      ..addAll(CorridaBanco.instancia.decodificarRota(registro['rota_json']));
+
+    // A rota antiga nÃ£o contÃ©m os metadados necessÃ¡rios para validar o prÃ³ximo
+    // trecho. A primeira leitura apÃ³s restaurar somente estabelece a base.
+    _ultimoPontoAceito = null;
+    _velocidadeSuavizadaMps = null;
+
+    if (_estado == 'em_andamento') {
+      _inicioTrechoMs = DateTime.now().millisecondsSinceEpoch;
+      _mensagemGps = 'Reconectando ao GPS.';
+      await _iniciarGps();
+    } else if (_estado == 'pausada') {
+      _mensagemGps = 'Corrida pausada.';
+    }
+
+    _enviarEstado(tipo: 'estado_confirmado', incluirRota: true);
+  }
+
+  @override
+  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {}
+
+  @override
+  void onRepeatEvent(DateTime timestamp) {
+    if (_estado == 'em_andamento' && _inicioTrechoMs != null) {
+      final agora = DateTime.now().millisecondsSinceEpoch;
+      _duracaoSegundos = ((_tempoAcumuladoMs + agora - _inicioTrechoMs!) / 1000)
+          .floor();
+
+      _salvarEmSegundoPlano();
+      FlutterForegroundTask.updateService(
+        notificationTitle: 'WorkHoly â€” Corrida em andamento',
+        notificationText:
+            '${(_distancia / 1000).toStringAsFixed(2)} km â€¢ '
+            '${_formatarTempoCurto(_duracaoSegundos)}',
+      );
+    }
+
+    // AtualizaÃ§Ãµes de cronÃ´metro nÃ£o transportam a rota inteira. A UI recebe
+    // somente novos pontos GPS quando eles sÃ£o aceitos.
+    _enviarEstado();
+  }
+
+  String _formatarTempoCurto(int segundos) {
+    final minutos = segundos ~/ 60;
+    final segundosRestantes = segundos % 60;
+    return '${minutos.toString().padLeft(2, '0')}:'
+        '${segundosRestantes.toString().padLeft(2, '0')}';
+  }
+
+  void _enviarEstado({
+    String tipo = 'atualizacao',
+    Map<String, double>? novoPonto,
+    bool incluirRota = false,
+  }) {
+    final ultimoPonto = _rota.isEmpty ? null : _rota.last;
+
+    FlutterForegroundTask.sendDataToMain({
+      'tipo': tipo,
+      'id': _id,
+      'estado': _estado,
+      'duracao': _duracaoSegundos,
+      'distancia': _distancia,
+      'calorias': _caloriasEstimadas,
+      'peso_kg': _pesoKg,
+      'latitude': ultimoPonto?['lat'],
+      'longitude': ultimoPonto?['lon'],
+      'precisao_gps': _precisaoGps,
+      'mensagem_gps': _mensagemGps,
+      'novo_ponto': ?novoPonto,
+      if (incluirRota) 'rota': _rota,
+    });
+  }
+
+  void _enviarErro(String mensagem) {
+    FlutterForegroundTask.sendDataToMain({
+      'tipo': 'erro',
+      'mensagem': mensagem,
+    });
+  }
+
+  void _salvarEmSegundoPlano() {
+    unawaited(
+      _salvarSeNecessario().catchError((Object erro, StackTrace stack) {
+        // _enfileirarPersistencia jÃ¡ comunica a falha
+        // pelo canal de erros do serviÃ§o.
+        // Aqui impedimos que a Future fique sem tratamento.
+      }),
+    );
+  }
+
+  Future<void> _salvarSeNecessario({bool forcar = false}) {
+    if (_id == null) return Future.value();
+
+    // Uma gravaÃ§Ã£o normal nunca deve reabrir ou sobrescrever
+    // uma corrida que jÃ¡ foi finalizada.
+    if (_estado == 'finalizada' && !forcar) {
+      return _filaDePersistencia;
+    }
+
+    final agora = DateTime.now().millisecondsSinceEpoch;
+
+    final passouIntervalo =
+        agora - _ultimoSalvamentoMs >=
+        _intervaloMinimoDePersistencia.inMilliseconds;
+
+    final avancouDistancia =
+        _distancia - _distanciaNoUltimoSalvamento >=
+        _distanciaMinimaDePersistencia;
+
+    if (!forcar && !passouIntervalo && !avancouDistancia) {
+      return _filaDePersistencia;
+    }
+
+    // Se existe uma gravaÃ§Ã£o em andamento, aguarda sua conclusÃ£o
+    // e verifica novamente se os dados mais recentes precisam ser salvos.
+    if (_salvamentosPendentes > 0) {
+      return _filaDePersistencia.then<void>((_) {
+        if (_estado == 'finalizada' && !forcar) {
+          return Future<void>.value();
+        }
+
+        return _salvarSeNecessario(forcar: forcar);
+      });
+    }
+
+    return _enfileirarPersistencia(finalizar: false);
+  }
+
+  Future<void> _enfileirarPersistencia({required bool finalizar}) {
+    final id = _id;
+    if (id == null) return Future<void>.value();
+
+    // Captura um retrato consistente dos dados desta gravaÃ§Ã£o.
+    final duracao = _duracaoSegundos;
+    final distancia = _distancia;
+    final estado = finalizar ? 'finalizada' : _estado;
+    final calorias = _caloriasEstimadas;
+    final pesoKg = _pesoKg;
+    final rota = _rota.map(Map<String, double>.from).toList(growable: false);
+    final fimMs = finalizar ? DateTime.now().millisecondsSinceEpoch : null;
+
+    _salvamentosPendentes += 1;
+
+    final operacao = _filaDePersistencia
+        .then<void>((_) async {
+          await CorridaBanco.instancia.atualizar(
+            id: id,
+            duracaoSegundos: duracao,
+            distanciaMetros: distancia,
+            estado: estado,
+            rota: rota,
+            fimMs: fimMs,
+            caloriasEstimadas: calorias,
+            pesoKg: pesoKg,
+          );
+
+          // Atualiza os indicadores somente apÃ³s salvar com sucesso.
+          _ultimoSalvamentoMs = DateTime.now().millisecondsSinceEpoch;
+          _distanciaNoUltimoSalvamento = distancia;
+        })
+        .whenComplete(() {
+          _salvamentosPendentes -= 1;
+        });
+
+    // A operaÃ§Ã£o retornada mantÃ©m a falha para o chamador.
+    // A fila interna Ã© recuperada para permitir novas gravaÃ§Ãµes.
+    _filaDePersistencia = operacao.then<void>(
+      (_) {},
+      onError: (Object erro, StackTrace stack) {
+        _enviarErro('NÃ£o foi possÃ­vel salvar a corrida: $erro');
+      },
+    );
+
+    return operacao;
+  }
+
+  Future<void> _iniciarGps() async {
+    await _gps?.cancel();
+
+    // MantÃ©m o stream contÃ­nuo para a rota, mas pede uma leitura imediata em
+    // paralelo. Em muitos aparelhos isso elimina a espera atÃ© a prÃ³xima
+    // emissÃ£o do stream sem reduzir a exigÃªncia de precisÃ£o do filtro.
+    unawaited(
+      Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.bestForNavigation,
+        ),
+      ).then(_processarPosicao).catchError((Object _) {}),
+    );
+
+    _gps =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.bestForNavigation,
+            distanceFilter: 3,
+          ),
+        ).listen(
+          _processarPosicao,
+          onError: (Object erro) {
+            _mensagemGps = 'GPS indisponÃ­vel.';
+            _enviarErro('Falha no GPS: $erro');
+            _enviarEstado();
+          },
+        );
+  }
+
+  void _processarPosicao(Position posicao) {
+    if (_estado != 'em_andamento') return;
+
+    _precisaoGps = posicao.accuracy;
+    final pontoAtual = PontoGps(
+      latitude: posicao.latitude,
+      longitude: posicao.longitude,
+      horario: posicao.timestamp,
+      precisaoMetros: posicao.accuracy,
+      temPrecisao: posicao.hasAccuracy,
+    );
+
+    final resultado = FiltroGpsCorrida.avaliar(
+      atual: pontoAtual,
+      anteriorAceito: _ultimoPontoAceito,
+    );
+
+    if (!resultado.aceito) {
+      _mensagemGps = _mensagemParaDescarte(resultado.motivoDescarte!);
+      _enviarEstado();
+      return;
+    }
+
+    final pontoAnterior = _ultimoPontoAceito;
+
+    _ultimoPontoAceito = pontoAtual;
+
+    _mensagemGps = 'GPS conectado â€¢ precisÃ£o de Â±${posicao.accuracy.round()} m';
+
+    if (pontoAnterior != null) {
+      final distanciaAceita = resultado.distanciaMetros;
+
+      final intervaloSegundos =
+          pontoAtual.horario.difference(pontoAnterior.horario).inMilliseconds /
+          1000.0;
+
+      _distancia += distanciaAceita;
+
+      final caloriasDoTrecho = _calcularCaloriasDoTrecho(
+        distanciaMetros: distanciaAceita,
+        intervaloSegundos: intervaloSegundos,
+      );
+
+      _caloriasEstimadas += caloriasDoTrecho;
+    }
+
+    final pontoDaRota = <String, double>{
+      'lat': posicao.latitude,
+      'lon': posicao.longitude,
+    };
+    _rota.add(pontoDaRota);
+    _salvarEmSegundoPlano();
+    _enviarEstado(novoPonto: pontoDaRota);
+  }
+
+  String _mensagemParaDescarte(MotivoDescarteGps motivo) {
+    return switch (motivo) {
+      MotivoDescarteGps.precisaoIndisponivel =>
+        'Aguardando uma leitura GPS com precisÃƒÂ£o.',
+      MotivoDescarteGps.precisaoInsuficiente =>
+        'Sinal GPS fraco â€¢ precisÃ£o acima de ${FiltroGpsCorrida.precisaoMaximaMetros.toInt()} m',
+      MotivoDescarteGps.velocidadeImprovavel =>
+        'Salto de GPS descartado para proteger a distÃ¢ncia.',
+      MotivoDescarteGps.movimentoMuitoCurto =>
+        'GPS conectado â€¢ aguardando movimento.',
+      MotivoDescarteGps.horarioInvalido =>
+        'Aguardando uma nova leitura do GPS.',
+      MotivoDescarteGps.coordenadaInvalida =>
+        'Leitura de GPS invÃ¡lida descartada.',
+    };
+  }
+
+  @override
+  void onReceiveData(Object data) {
+    if (data is! Map) return;
+    _filaDeComandos = _filaDeComandos.then((_) => _executarComando(data));
+    unawaited(_filaDeComandos);
+  }
+
+  Future<void> _executarComando(Map data) async {
+    try {
+      final comando = data['comando'];
+
+      if (comando == 'iniciar') {
+        await _iniciarNova(data);
+      } else if (comando == 'restaurar') {
+        final id = data['id'];
+        if (id is String) await _restaurar(id);
+      } else if (comando == 'pausar') {
+        await _pausar();
+      } else if (comando == 'retomar') {
+        await _retomar();
+      } else if (comando == 'finalizar') {
+        await _finalizar();
+      }
+    } catch (erro) {
+      _enviarErro('NÃ£o foi possÃ­vel executar o comando da corrida: $erro');
+    }
+  }
+
+  Future<void> _iniciarNova(Map data) async {
+    final id = data['id'];
+    if (id is! String) {
+      throw ArgumentError.value(
+        id,
+        'id',
+        'O identificador da corrida Ã© obrigatÃ³rio.',
+      );
+    }
+
+    _id = id;
+    _estado = 'em_andamento';
+    _distancia = 0;
+    _duracaoSegundos = 0;
+    _caloriasEstimadas = 0;
+    final pesoRecebido = data['pesoKg'];
+    _pesoKg =
+        pesoRecebido is num &&
+            pesoRecebido.isFinite &&
+            pesoRecebido > 0 &&
+            pesoRecebido <= 500
+        ? pesoRecebido.toDouble()
+        : null;
+    _tempoAcumuladoMs = 0;
+    _inicioTrechoMs = DateTime.now().millisecondsSinceEpoch;
+    _ultimoPontoAceito = null;
+    _velocidadeSuavizadaMps = null;
+    _precisaoGps = null;
+    _mensagemGps = 'Buscando sinal GPS.';
+    _ultimoSalvamentoMs = 0;
+    _distanciaNoUltimoSalvamento = 0;
+    _rota.clear();
+
+    await _iniciarGps();
+    await _salvarSeNecessario(forcar: true);
+    _enviarEstado(tipo: 'estado_confirmado', incluirRota: true);
+  }
+
+  Future<void> _pausar({bool confirmar = true}) async {
+    if (_estado != 'em_andamento') return;
+
+    final agora = DateTime.now().millisecondsSinceEpoch;
+    if (_inicioTrechoMs != null) {
+      _tempoAcumuladoMs += agora - _inicioTrechoMs!;
+    }
+
+    _duracaoSegundos = (_tempoAcumuladoMs / 1000).floor();
+    _inicioTrechoMs = null;
+    _estado = 'pausada';
+    _mensagemGps = 'Corrida pausada.';
+
+    await _gps?.cancel();
+    _gps = null;
+    await FlutterForegroundTask.updateService(
+      notificationTitle: 'WorkHoly â€” Corrida pausada',
+      notificationText: 'Abra o aplicativo para retomar ou finalizar.',
+    );
+    await _salvarSeNecessario(forcar: true);
+
+    if (confirmar) {
+      _enviarEstado(tipo: 'estado_confirmado');
+    }
+  }
+
+  Future<void> _retomar() async {
+    if (_estado != 'pausada') return;
+
+    _estado = 'em_andamento';
+    _inicioTrechoMs = DateTime.now().millisecondsSinceEpoch;
+    _ultimoPontoAceito = null;
+    _velocidadeSuavizadaMps = null;
+    _precisaoGps = null;
+    _mensagemGps = 'Buscando sinal GPS.';
+
+    await _iniciarGps();
+    await _salvarSeNecessario(forcar: true);
+    _enviarEstado(tipo: 'estado_confirmado');
+  }
+
+  Future<void> _finalizar() async {
+    // Um segundo comando nÃ£o deve alterar a data de tÃ©rmino.
+    if (_estado == 'finalizada') return;
+
+    if (_id == null) return;
+
+    if (_estado == 'em_andamento') {
+      await _pausar(confirmar: false);
+    }
+
+    // A pausa pode ter falhado; sÃ³ finalize se houver uma sessÃ£o vÃ¡lida.
+    if (_id == null || _estado != 'pausada') return;
+
+    _estado = 'finalizada';
+    _mensagemGps = 'Corrida finalizada.';
+
+    await _enfileirarPersistencia(finalizar: true);
+
+    _enviarEstado(tipo: 'finalizada', incluirRota: true);
+
+    await FlutterForegroundTask.stopService();
+  }
+
+  @override
+  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
+    if (_estado == 'em_andamento' && _inicioTrechoMs != null) {
+      final agora = DateTime.now().millisecondsSinceEpoch;
+      _duracaoSegundos = ((_tempoAcumuladoMs + agora - _inicioTrechoMs!) / 1000)
+          .floor();
+      await _salvarSeNecessario(forcar: true);
+    }
+
+    await _gps?.cancel();
+    _gps = null;
+  }
+}
+
+
+
+========================================
+ARQUIVO: pubspec.yaml
+========================================
+
+
+name: workholy_mobile
+description: "A new Flutter project."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  shared_preferences: ^2.5.6
+  geolocator: ^14.1.2
+  latlong2: ^0.10.1
+  flutter_map: ^8.3.2
+  sqflite: ^2.4.4+2
+  flutter_foreground_task: ^11.0.3
+  path: ^1.9.1
+  firebase_core: ^5.0.0
+  firebase_auth: ^7.0.0
+  cloud_firestore: ^7.0.0
+  crypto: ^3.0.7
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+  sqflite_common_ffi: ^2.3.6
+  test: ^1.24.0
+  fl_chart: ^1.1.1
+flutter:
+  uses-material-design: true
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icons/logo.png"
+  adaptive_icon_background: "#101010"
+  adaptive_icon_foreground: "assets/icons/logo.png"
+

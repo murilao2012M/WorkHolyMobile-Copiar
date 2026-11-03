@@ -4,6 +4,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:geolocator/geolocator.dart';
 
 import 'corrida_banco.dart';
+import 'corrida_calorias.dart';
 import 'filtro_gps.dart';
 
 @pragma('vm:entry-point')
@@ -19,7 +20,7 @@ class CorridaTaskHandler extends TaskHandler {
 
   String? _id;
   String _estado = 'parada';
-  final List<Map<String, double>> _rota = [];
+  final List<Map<String, Object?>> _rota = [];
 
   PontoGps? _ultimoPontoAceito;
   double? _precisaoGps;
@@ -29,6 +30,8 @@ class CorridaTaskHandler extends TaskHandler {
   int _duracaoSegundos = 0;
   double _caloriasEstimadas = 0;
   double? _pesoKg;
+  //Velocidade suavizada para reduzir oscilações provocados pelo GPS
+  double? _velocidadeSuavizadaMps;
   int _tempoAcumuladoMs = 0;
   int? _inicioTrechoMs;
 
@@ -37,6 +40,59 @@ class CorridaTaskHandler extends TaskHandler {
   int _salvamentosPendentes = 0;
   int _ultimoSalvamentoMs = 0;
   double _distanciaNoUltimoSalvamento = 0;
+
+  /// Calcula o gasto energético de um trecho utilizando a velocidade
+  /// de deslocamento, o peso corporal e o tempo decorrido.
+  ///
+  /// Modelo fisiológico simplificado baseado na equação de corrida ACSM.
+  /// O resultado representa quilocalorias estimadas (gasto bruto).
+  double _calcularCaloriasDoTrecho({
+    required double distanciaMetros,
+    required double intervaloSegundos,
+  }) {
+    final peso = _pesoKg;
+
+    if (peso == null ||
+        !peso.isFinite ||
+        peso <= 0 ||
+        !distanciaMetros.isFinite ||
+        distanciaMetros <= 0 ||
+        !intervaloSegundos.isFinite ||
+        intervaloSegundos <= 0) {
+      return 0;
+    }
+
+    // Velocidade média do trecho em metros por segundo.
+    final velocidadeMps = distanciaMetros / intervaloSegundos;
+
+    if (!velocidadeMps.isFinite ||
+        velocidadeMps <= 0 ||
+        velocidadeMps > FiltroGpsCorrida.velocidadeMaximaMetrosPorSegundo) {
+      return 0;
+    }
+
+    // Suavização exponencial para reduzir variações do GPS.
+    const fatorSuavizacao = 0.35;
+
+    final velocidadeAnterior = _velocidadeSuavizadaMps;
+
+    _velocidadeSuavizadaMps = velocidadeAnterior == null
+        ? velocidadeMps
+        : velocidadeAnterior +
+              fatorSuavizacao * (velocidadeMps - velocidadeAnterior);
+
+    final caloriasDoTrecho = CaloriasCorrida.trecho(
+      velocidadeMetrosPorSegundo: _velocidadeSuavizadaMps!,
+      intervaloSegundos: intervaloSegundos,
+      pesoKg: peso,
+    );
+
+    if (!caloriasDoTrecho.isFinite || caloriasDoTrecho < 0) {
+      return 0;
+    }
+
+    return caloriasDoTrecho;
+  }
 
   Future<void> _restaurar(String id) async {
     // Evita reiniciar o cronômetro e o GPS ao restaurar
@@ -74,6 +130,7 @@ class CorridaTaskHandler extends TaskHandler {
     // A rota antiga não contém os metadados necessários para validar o próximo
     // trecho. A primeira leitura após restaurar somente estabelece a base.
     _ultimoPontoAceito = null;
+    _velocidadeSuavizadaMps = null;
 
     if (_estado == 'em_andamento') {
       _inicioTrechoMs = DateTime.now().millisecondsSinceEpoch;
@@ -119,7 +176,7 @@ class CorridaTaskHandler extends TaskHandler {
 
   void _enviarEstado({
     String tipo = 'atualizacao',
-    Map<String, double>? novoPonto,
+    Map<String, Object?>? novoPonto,
     bool incluirRota = false,
   }) {
     final ultimoPonto = _rota.isEmpty ? null : _rota.last;
@@ -206,7 +263,9 @@ class CorridaTaskHandler extends TaskHandler {
     final estado = finalizar ? 'finalizada' : _estado;
     final calorias = _caloriasEstimadas;
     final pesoKg = _pesoKg;
-    final rota = _rota.map(Map<String, double>.from).toList(growable: false);
+    final rota = _rota
+        .map((ponto) => Map<String, Object?>.from(ponto))
+        .toList(growable: false);
     final fimMs = finalizar ? DateTime.now().millisecondsSinceEpoch : null;
 
     _salvamentosPendentes += 1;
@@ -247,73 +306,116 @@ class CorridaTaskHandler extends TaskHandler {
   Future<void> _iniciarGps() async {
     await _gps?.cancel();
 
+    // Mantém o stream contínuo para a rota, mas pede uma leitura imediata em
+    // paralelo. Em muitos aparelhos isso elimina a espera até a próxima
+    // emissão do stream sem reduzir a exigência de precisão do filtro.
+    unawaited(
+      Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.bestForNavigation,
+        ),
+      ).then(_processarPosicao).catchError((Object _) {}),
+    );
+
     _gps =
         Geolocator.getPositionStream(
           locationSettings: const LocationSettings(
             accuracy: LocationAccuracy.bestForNavigation,
-            distanceFilter: 5,
+            distanceFilter: 3,
           ),
         ).listen(
-          (posicao) {
-            if (_estado != 'em_andamento') return;
-
-            _precisaoGps = posicao.accuracy;
-            final pontoAtual = PontoGps(
-              latitude: posicao.latitude,
-              longitude: posicao.longitude,
-              horario: posicao.timestamp,
-              precisaoMetros: posicao.accuracy,
-              temPrecisao: posicao.hasAccuracy,
-            );
-
-            final resultado = FiltroGpsCorrida.avaliar(
-              atual: pontoAtual,
-              anteriorAceito: _ultimoPontoAceito,
-            );
-
-            if (!resultado.aceito) {
-              _mensagemGps = _mensagemParaDescarte(resultado.motivoDescarte!);
-              _enviarEstado();
-              return;
-            }
-
-            final haviaPontoAnterior = _ultimoPontoAceito != null;
-            _ultimoPontoAceito = pontoAtual;
-            _mensagemGps =
-                'GPS conectado • precisão de ±${posicao.accuracy.round()} m';
-
-            if (haviaPontoAnterior) {
-              final distanciaAceita = resultado.distanciaMetros;
-
-              // Soma somente a distância aprovada pelo filtro GPS.
-              _distancia += distanciaAceita;
-
-              // Estimativa: peso (kg) x distância (km).
-              // Sem peso válido, não inventa um valor de calorias.
-              if (_pesoKg != null &&
-                  _pesoKg!.isFinite &&
-                  _pesoKg! > 0 &&
-                  distanciaAceita.isFinite &&
-                  distanciaAceita > 0) {
-                _caloriasEstimadas += _pesoKg! * (distanciaAceita / 1000);
-              }
-            }
-
-            final pontoDaRota = <String, double>{
-              'lat': posicao.latitude,
-              'lon': posicao.longitude,
-            };
-
-            _rota.add(pontoDaRota);
-            _salvarEmSegundoPlano();
-            _enviarEstado(novoPonto: pontoDaRota);
-          },
+          _processarPosicao,
           onError: (Object erro) {
             _mensagemGps = 'GPS indisponível.';
             _enviarErro('Falha no GPS: $erro');
             _enviarEstado();
           },
         );
+  }
+
+  void _processarPosicao(Position posicao) {
+    if (_estado != 'em_andamento') return;
+
+    _precisaoGps = posicao.accuracy;
+
+    final pontoAtual = PontoGps(
+      latitude: posicao.latitude,
+      longitude: posicao.longitude,
+      horario: posicao.timestamp,
+      precisaoMetros: posicao.accuracy,
+      temPrecisao: posicao.hasAccuracy,
+    );
+
+    final resultado = FiltroGpsCorrida.avaliar(
+      atual: pontoAtual,
+      anteriorAceito: _ultimoPontoAceito,
+    );
+
+    if (!resultado.aceito) {
+      _mensagemGps = _mensagemParaDescarte(resultado.motivoDescarte!);
+      _enviarEstado();
+      return;
+    }
+
+    final pontoAnterior = _ultimoPontoAceito;
+
+    // O primeiro ponto aceito estabelece a referência.
+    // Não soma distância nem calcula ritmo nesse momento.
+    _ultimoPontoAceito = pontoAtual;
+
+    _mensagemGps = 'GPS conectado • precisão de ±${posicao.accuracy.round()} m';
+
+    var distanciaTrecho = 0.0;
+    double? velocidadeMps;
+    double? ritmoSegundosKm;
+
+    if (pontoAnterior != null) {
+      final intervaloMs = pontoAtual.horario
+          .difference(pontoAnterior.horario)
+          .inMilliseconds;
+
+      final intervaloSegundos = intervaloMs / Duration.millisecondsPerSecond;
+
+      distanciaTrecho = resultado.distanciaMetros;
+
+      if (intervaloSegundos > 0 && distanciaTrecho > 0) {
+        velocidadeMps = distanciaTrecho / intervaloSegundos;
+
+        if (velocidadeMps.isFinite && velocidadeMps > 0) {
+          ritmoSegundosKm = 1000 / velocidadeMps;
+        } else {
+          velocidadeMps = null;
+          ritmoSegundosKm = null;
+        }
+      }
+
+      _distancia += distanciaTrecho;
+
+      final caloriasDoTrecho = _calcularCaloriasDoTrecho(
+        distanciaMetros: distanciaTrecho,
+        intervaloSegundos: intervaloSegundos,
+      );
+
+      _caloriasEstimadas += caloriasDoTrecho;
+    }
+
+    // Registra a amostra completa para os gráficos e para a reconstrução
+    // do desempenho histórico.
+    final pontoDaRota = <String, Object?>{
+      'lat': posicao.latitude,
+      'lon': posicao.longitude,
+      'timestamp': pontoAtual.horario.millisecondsSinceEpoch,
+      'precisao': posicao.accuracy,
+      'distanciaTrecho': distanciaTrecho,
+      'distanciaAcumulada': _distancia,
+      'velocidadeMps': ?velocidadeMps,
+      'ritmoSegundosKm': ?ritmoSegundosKm,
+    };
+
+    _rota.add(pontoDaRota);
+
+    _salvarEmSegundoPlano();
+    _enviarEstado(novoPonto: pontoDaRota);
   }
 
   String _mensagemParaDescarte(MotivoDescarteGps motivo) {
@@ -387,6 +489,7 @@ class CorridaTaskHandler extends TaskHandler {
     _tempoAcumuladoMs = 0;
     _inicioTrechoMs = DateTime.now().millisecondsSinceEpoch;
     _ultimoPontoAceito = null;
+    _velocidadeSuavizadaMps = null;
     _precisaoGps = null;
     _mensagemGps = 'Buscando sinal GPS.';
     _ultimoSalvamentoMs = 0;
@@ -430,6 +533,7 @@ class CorridaTaskHandler extends TaskHandler {
     _estado = 'em_andamento';
     _inicioTrechoMs = DateTime.now().millisecondsSinceEpoch;
     _ultimoPontoAceito = null;
+    _velocidadeSuavizadaMps = null;
     _precisaoGps = null;
     _mensagemGps = 'Buscando sinal GPS.';
 
@@ -454,7 +558,17 @@ class CorridaTaskHandler extends TaskHandler {
     _estado = 'finalizada';
     _mensagemGps = 'Corrida finalizada.';
 
-    await _enfileirarPersistencia(finalizar: true);
+    try {
+      await _enfileirarPersistencia(finalizar: true);
+    } catch (erro) {
+      // Permite tentar finalizar novamente caso a gravação falhe.
+      _estado = 'pausada';
+      _mensagemGps = 'Corrida pausada.';
+
+      _enviarEstado(tipo: 'estado_confirmado', incluirRota: true);
+
+      rethrow;
+    }
 
     _enviarEstado(tipo: 'finalizada', incluirRota: true);
 

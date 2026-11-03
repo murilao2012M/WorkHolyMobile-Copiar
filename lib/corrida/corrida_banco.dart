@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
+import '../sincronizacao/controle_alteracoes_sqlite.dart';
+
 /// Registro de uma corrida concluída, usado pelos resumos do aplicativo.
 class CorridaConcluida {
   const CorridaConcluida({
@@ -13,6 +15,8 @@ class CorridaConcluida {
     required this.distanciaMetros,
     this.caloriasEstimadas = 0,
     this.pesoKg,
+    this.workfitPlanoId,
+    this.rpe,
   });
 
   final String id;
@@ -22,6 +26,8 @@ class CorridaConcluida {
   final double distanciaMetros;
   final double caloriasEstimadas;
   final double? pesoKg;
+  final String? workfitPlanoId;
+  final int? rpe;
 
   factory CorridaConcluida.fromRegistro(Map<String, Object?> registro) {
     final inicioMs = (registro['inicio_ms'] as num?)?.toInt();
@@ -41,6 +47,8 @@ class CorridaConcluida {
       caloriasEstimadas:
           (registro['calorias_estimadas'] as num?)?.toDouble() ?? 0,
       pesoKg: (registro['peso_kg'] as num?)?.toDouble(),
+      workfitPlanoId: registro['workfit_plano_id'] as String?,
+      rpe: registro['rpe'] as int?,
     );
   }
 }
@@ -66,7 +74,7 @@ class CorridaBanco {
 
     _db = await openDatabase(
       caminho,
-      version: 2,
+      version: 4,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE corridas (
@@ -78,9 +86,12 @@ class CorridaBanco {
             estado TEXT NOT NULL,
             rota_json TEXT NOT NULL DEFAULT '[]',
             calorias_estimadas REAL NOT NULL DEFAULT 0,
-            peso_kg REAL
+            peso_kg REAL,
+            workfit_plano_id TEXT,
+            rpe INTEGER CHECK (rpe IS NULL OR rpe BETWEEN 1 AND 10)
           )
         ''');
+        await ControleAlteracoesSqlite.criar(db, ['corridas']);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -90,13 +101,31 @@ class CorridaBanco {
           );
           await db.execute('ALTER TABLE corridas ADD COLUMN peso_kg REAL');
         }
+        if (oldVersion < 3) {
+          await ControleAlteracoesSqlite.criar(db, ['corridas']);
+        }
+        if (oldVersion < 4) {
+          await db.execute(
+            'ALTER TABLE corridas ADD COLUMN workfit_plano_id TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE corridas ADD COLUMN rpe INTEGER '
+            'CHECK (rpe IS NULL OR rpe BETWEEN 1 AND 10)',
+          );
+        }
       },
     );
 
     return _db!;
   }
 
-  Future<void> criar(String id, int inicioMs) async {
+  Future<int> versaoAlteracoes() async =>
+      ControleAlteracoesSqlite.ler(await database);
+
+  Future<void> criar(String id, int inicioMs, {String? workfitPlanoId}) async {
+    if (workfitPlanoId != null && workfitPlanoId.trim().isEmpty) {
+      throw ArgumentError.value(workfitPlanoId, 'workfitPlanoId');
+    }
     final db = await database;
 
     await db.insert('corridas', {
@@ -109,6 +138,7 @@ class CorridaBanco {
       'rota_json': '[]',
       'calorias_estimadas': 0.0,
       'peso_kg': null,
+      'workfit_plano_id': workfitPlanoId,
     });
   }
 
@@ -176,6 +206,62 @@ class CorridaBanco {
     return db.query('corridas', orderBy: 'inicio_ms DESC');
   }
 
+  /// Registros no formato seguro para a sincronização por conta.
+  Future<List<Map<String, dynamic>>> exportarDadosDoUsuario() async {
+    return (await exportarDadosDoUsuarioComVersao()).dados;
+  }
+
+  /// A versão e os dados são lidos na mesma transação deste banco.
+  Future<SnapshotLocal<List<Map<String, dynamic>>>>
+  exportarDadosDoUsuarioComVersao() async {
+    final db = await database;
+    return db.transaction((txn) async {
+      final versao = await ControleAlteracoesSqlite.ler(txn);
+      final registros = await txn.query('corridas', orderBy: 'inicio_ms DESC');
+      return SnapshotLocal(
+        versao: versao,
+        dados: registros
+            .map((registro) => Map<String, dynamic>.from(registro))
+            .toList(),
+      );
+    });
+  }
+
+  /// Troca o cache local pelas corridas pertencentes à conta autenticada.
+  Future<void> importarDadosDoUsuario(
+    List<Map<String, dynamic>> corridas,
+  ) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('corridas');
+      for (final corrida in corridas) {
+        final id = corrida['id']?.toString().trim() ?? '';
+        if (id.isEmpty) continue;
+        await txn.insert('corridas', {
+          'id': id,
+          'inicio_ms': (corrida['inicio_ms'] as num?)?.toInt() ?? 0,
+          'fim_ms': (corrida['fim_ms'] as num?)?.toInt(),
+          'duracao_segundos':
+              (corrida['duracao_segundos'] as num?)?.toInt() ?? 0,
+          'distancia_metros':
+              (corrida['distancia_metros'] as num?)?.toDouble() ?? 0,
+          'estado': corrida['estado']?.toString() ?? 'finalizada',
+          'rota_json': corrida['rota_json']?.toString() ?? '[]',
+          'calorias_estimadas':
+              (corrida['calorias_estimadas'] as num?)?.toDouble() ?? 0,
+          'peso_kg': (corrida['peso_kg'] as num?)?.toDouble(),
+          'workfit_plano_id': corrida['workfit_plano_id'] as String?,
+          'rpe': corrida['rpe'] as int?,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    });
+  }
+
+  Future<void> limparDadosDoUsuario() async {
+    final db = await database;
+    await db.delete('corridas');
+  }
+
   Future<List<CorridaConcluida>> listarFinalizadas() async {
     final db = await database;
 
@@ -189,12 +275,28 @@ class CorridaBanco {
     return registros.map(CorridaConcluida.fromRegistro).toList();
   }
 
+  Future<void> registrarRpe(String id, int rpe) async {
+    if (rpe < 1 || rpe > 10) {
+      throw ArgumentError.value(rpe, 'rpe', 'Deve estar entre 1 e 10.');
+    }
+    final db = await database;
+    final alteradas = await db.update(
+      'corridas',
+      {'rpe': rpe},
+      where: 'id = ? AND estado = ?',
+      whereArgs: [id, 'finalizada'],
+    );
+    if (alteradas != 1) {
+      throw StateError('A corrida finalizada não foi encontrada.');
+    }
+  }
+
   Future<void> atualizar({
     required String id,
     required int duracaoSegundos,
     required double distanciaMetros,
     required String estado,
-    required List<Map<String, double>> rota,
+    required List<Map<String, Object?>> rota,
     double caloriasEstimadas = 0,
     double? pesoKg,
     int? fimMs,
@@ -217,7 +319,7 @@ class CorridaBanco {
     await db.update('corridas', valores, where: 'id = ?', whereArgs: [id]);
   }
 
-  List<Map<String, double>> decodificarRota(Object? valor) {
+  List<Map<String, Object?>> decodificarRota(Object? valor) {
     if (valor is! String || valor.isEmpty) return [];
 
     try {
@@ -225,12 +327,51 @@ class CorridaBanco {
 
       if (dados is! List) return [];
 
-      return dados.whereType<Map>().map((ponto) {
-        return <String, double>{
-          'lat': (ponto['lat'] as num).toDouble(),
-          'lon': (ponto['lon'] as num).toDouble(),
-        };
-      }).toList();
+      final rota = <Map<String, Object?>>[];
+
+      for (final item in dados) {
+        if (item is! Map) continue;
+
+        final lat = item['lat'];
+        final lon = item['lon'];
+
+        if (lat is! num || lon is! num) continue;
+
+        final latitude = lat.toDouble();
+        final longitude = lon.toDouble();
+
+        if (!latitude.isFinite ||
+            !longitude.isFinite ||
+            latitude < -90 ||
+            latitude > 90 ||
+            longitude < -180 ||
+            longitude > 180) {
+          continue;
+        }
+
+        final ponto = <String, Object?>{'lat': latitude, 'lon': longitude};
+
+        // Preserva os metadados das corridas no formato novo.
+        // Corridas antigas continuam válidas, mesmo sem esses campos.
+        for (final campo in [
+          'timestamp',
+          'precisao',
+          'distanciaTrecho',
+          'distanciaAcumulada',
+          'velocidadeMps',
+          'ritmoSegundosKm',
+        ]) {
+          final valorCampo = item[campo];
+
+          if (valorCampo is num && valorCampo.isFinite) {
+            ponto[campo] = valorCampo;
+          }
+        }
+
+        rota.add(ponto);
+      }
+
+      return rota;
     } catch (_) {
       return [];
     }

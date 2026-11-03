@@ -1,5 +1,6 @@
+import 'package:flutter/material.dart' hide Icon;
 
-import 'package:flutter/material.dart';
+import 'painel/w_icone.dart';
 
 class TutorialPrimeiroAcessoPage extends StatefulWidget {
   const TutorialPrimeiroAcessoPage({super.key});
@@ -90,10 +91,7 @@ class _TutorialPrimeiroAcessoPageState
         title: const Text('Primeiros passos'),
         automaticallyImplyLeading: false,
         actions: [
-          TextButton(
-            onPressed: _pular,
-            child: const Text('Pular'),
-          ),
+          TextButton(onPressed: _pular, child: const Text('Pular')),
           const SizedBox(width: 8),
         ],
       ),
@@ -144,8 +142,7 @@ class _TutorialPrimeiroAcessoPageState
                     return SingleChildScrollView(
                       child: ConstrainedBox(
                         constraints: BoxConstraints(
-                          minHeight:
-                              MediaQuery.sizeOf(context).height * 0.48,
+                          minHeight: MediaQuery.sizeOf(context).height * 0.48,
                         ),
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -199,9 +196,8 @@ class _TutorialPrimeiroAcessoPageState
                                   Expanded(
                                     child: Text(
                                       item.dica,
-                                      style: tema.textTheme.bodyMedium?.copyWith(
-                                        height: 1.4,
-                                      ),
+                                      style: tema.textTheme.bodyMedium
+                                          ?.copyWith(height: 1.4),
                                     ),
                                   ),
                                 ],

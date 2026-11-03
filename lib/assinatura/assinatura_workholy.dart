@@ -1,43 +1,29 @@
+import 'package:firebase_auth/firebase_auth.dart';
 
 import '../dados/workholy_banco.dart';
 
-/// Fonte única de autorização do Premium.
+/// Fonte única de autorização dos recursos Premium.
 ///
-/// No desenvolvimento, permite testar todas as funções sem compra.
-/// Na versão comercial, o modo de desenvolvimento deve permanecer desativado.
+/// Nesta fase de lançamento, todos os usuários possuem acesso completo.
+/// A estrutura de assinaturas permanece preparada para monetização futura.
 class AssinaturaWorkHoly {
   AssinaturaWorkHoly._();
 
   static final instancia = AssinaturaWorkHoly._();
 
-  static const _chavePremiumAtivo =
-      'workholy_assinatura_premium_ativa_v1';
+  static const _chavePremiumAtivo = 'workholy_assinatura_premium_ativa_v1';
 
-  static const bool _modoDesenvolvimentoPremium =
-      bool.fromEnvironment(
-    'WORKHOLY_DEV_PREMIUM',
-    defaultValue: false,
-  );
+  /// Mantém disponível a identificação da conta autenticada.
+  String? get emailUsuario =>
+      FirebaseAuth.instance.currentUser?.email?.trim().toLowerCase();
 
+  /// Acesso gratuito e completo para todos os usuários nesta versão.
   Future<bool> possuiPremium() async {
-    // Libera os recursos Premium somente quando a compilação
-    // foi iniciada explicitamente com a opção de desenvolvimento.
-    if (_modoDesenvolvimentoPremium) {
-      return true;
-    }
-
-    // Com o modo de desenvolvimento desativado, mantém
-    // o comportamento normal da assinatura.
-    return await WorkHolyBanco.instancia
-            .lerBooleano(_chavePremiumAtivo) ??
-        false;
+    return true;
   }
 
   /// Reservado à integração futura com compras validadas.
   Future<void> atualizarAposCompraValidada(bool ativo) {
-    return WorkHolyBanco.instancia.salvarBooleano(
-      _chavePremiumAtivo,
-      ativo,
-    );
+    return WorkHolyBanco.instancia.salvarBooleano(_chavePremiumAtivo, ativo);
   }
 }

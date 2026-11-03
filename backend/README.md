@@ -17,3 +17,29 @@ das compras do Google Play. Nenhuma credencial deve ser adicionada ao Git.
 
 O aplicativo nunca recebe chaves de conta de serviço e nunca define o campo
 `premium` por conta própria.
+
+## Backup versionado
+
+As regras deste diretório precisam ser publicadas no projeto Firebase correto
+antes de testar o backup no aplicativo. A partir da raiz do repositório, após
+conferir o projeto selecionado, use
+`firebase deploy --config backend/firebase.json --only firestore:rules`.
+Essa implantação altera regras remotas e não é feita automaticamente.
+
+As cópias são divididas em documentos imutáveis em `workholy_backups/{uid}`,
+com verificação de integridade e comparação transacional da versão ativa.
+Versões e partes incompletas não são apagadas automaticamente; monitore custos
+e armazenamento. A migração do formato antigo e a liberação segura da troca de
+conta ainda não estão implementadas. O aplicativo mantém o recurso desativado
+por padrão; a flag experimental descrita no README principal é apenas para
+testes. Teste o fluxo completo em aparelhos reais antes de habilitá-lo para
+usuários.
+
+O codec experimental rejeita dados acima de 256 MiB descompactados ou 100 MiB
+compactados, sem truncá-los. A restauração só é executada quando os dois bancos
+locais permitem uma transação atômica entre arquivos; por exemplo, ela recusa
+bancos em modo WAL. O envio automático depende de o aplicativo estar aberto.
+
+O teste `integration_test/backup_android_test.dart` usa exclusivamente os
+emuladores Auth e Firestore, no projeto fictício `demo-workholy`; ele precisa de
+um emulador Android conectado e ainda não foi validado neste ambiente.

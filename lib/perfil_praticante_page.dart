@@ -1,16 +1,19 @@
 import 'dart:convert';
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart' hide Icon;
+
+import 'painel/w_icone.dart';
 
 import 'corrida/corrida_banco.dart';
 import 'dados/workholy_banco.dart';
-import 'assinatura/assinatura_workholy.dart';
-import 'assinatura/plano_premium_page.dart';
 
-const _perfilKey = 'workholy_perfil_praticante_v1';
-const _verdePerfil = Color(0xFFB7F34A);
-const _textoPerfil = Color(0xFFA4AAA0);
+import 'sincronizacao/sincronizacao_usuario.dart';
+
+const chavePerfilPraticante = 'workholy_perfil_praticante_v1';
+const _verdePerfil = Color(0xFFC6F432);
+const _textoPerfil = Color(0xFF9AA0AB);
 
 class PerfilPraticantePage extends StatefulWidget {
   const PerfilPraticantePage({super.key});
@@ -24,14 +27,7 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
   final _altura = TextEditingController();
   final _peso = TextEditingController();
   final _objetivoPersonalizado = TextEditingController();
-  final Map<String, TextEditingController> _medidas = {
-    'Cintura': TextEditingController(),
-    'Peito': TextEditingController(),
-    'Quadril': TextEditingController(),
-    'Braço': TextEditingController(),
-    'Coxa': TextEditingController(),
-    'Panturrilha': TextEditingController(),
-  };
+  Map<String, dynamic> _medidasSalvas = {};
   DateTime? _nascimento;
   String _objetivo = 'Hipertrofia', _experiencia = 'Iniciante';
   bool _carregando = true, _salvando = false;
@@ -39,7 +35,6 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
   List<AvaliacaoFisica> _avaliacoes = const [];
   int _treinosSemana = 0, _corridasSemana = 0;
   double _kmSemana = 0;
-  bool _possuiPremium = false;
 
   @override
   void initState() {
@@ -57,16 +52,23 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
       ).subtract(Duration(days: agora.weekday - 1));
       final fim = inicio.add(const Duration(days: 7));
       final resultados = await Future.wait([
-        WorkHolyBanco.instancia.lerTexto(_perfilKey),
+        WorkHolyBanco.instancia.lerTexto(chavePerfilPraticante),
         WorkHolyBanco.instancia.listarMetasPessoais(),
         WorkHolyBanco.instancia.listarAvaliacoesFisicas(),
         WorkHolyBanco.instancia.contarSessoesConcluidasNoPeriodo(inicio, fim),
         CorridaBanco.instancia.listarFinalizadas(),
-        AssinaturaWorkHoly.instancia.possuiPremium(),
       ]);
+
+      if (!mounted) return;
       final texto = resultados[0] as String?;
       if (texto != null) {
         _preencherPerfil(jsonDecode(texto) as Map<String, dynamic>);
+      } else {
+        final nomeAutenticado = FirebaseAuth.instance.currentUser?.displayName
+            ?.trim();
+        if (nomeAutenticado != null && nomeAutenticado.isNotEmpty) {
+          _nome.text = nomeAutenticado;
+        }
       }
       final corridas = (resultados[4] as List<CorridaConcluida>)
           .where(
@@ -84,7 +86,6 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
           0.0,
           (soma, item) => soma + item.distanciaMetros / 1000,
         );
-        _possuiPremium = resultados[5] as bool;
       });
     } catch (erro) {
       debugPrint('Erro ao carregar perfil: $erro');
@@ -94,7 +95,10 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
   }
 
   void _preencherPerfil(Map<String, dynamic> dados) {
-    _nome.text = dados['nome']?.toString() ?? '';
+    final nome = dados['nome']?.toString().trim() ?? '';
+    _nome.text = nome.isNotEmpty
+        ? nome
+        : FirebaseAuth.instance.currentUser?.displayName?.trim() ?? '';
     _altura.text = dados['altura']?.toString() ?? '';
     _peso.text = dados['peso']?.toString() ?? '';
     _objetivo = dados['objetivo']?.toString() ?? _objetivo;
@@ -102,11 +106,9 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
     _objetivoPersonalizado.text =
         dados['objetivoPersonalizado']?.toString() ?? '';
     _nascimento = DateTime.tryParse(dados['nascimento']?.toString() ?? '');
-    if (dados['medidas'] is Map) {
-      for (final item in _medidas.entries) {
-        item.value.text = (dados['medidas'] as Map)[item.key]?.toString() ?? '';
-      }
-    }
+    _medidasSalvas = dados['medidas'] is Map
+        ? Map<String, dynamic>.from(dados['medidas'] as Map)
+        : {};
   }
 
   double? _numero(String valor) =>
@@ -124,9 +126,7 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
     'objetivo': _objetivo,
     'objetivoPersonalizado': _objetivoPersonalizado.text.trim(),
     'experiencia': _experiencia,
-    'medidas': {
-      for (final item in _medidas.entries) item.key: item.value.text.trim(),
-    },
+    if (_medidasSalvas.isNotEmpty) 'medidas': _medidasSalvas,
     'atualizadoEm': DateTime.now().toIso8601String(),
   };
 
@@ -134,9 +134,35 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
     if (validar && !_formKey.currentState!.validate()) {
       return;
     }
+    final dados = _dados;
+    final nome = _nome.text.trim();
+    final usuario = FirebaseAuth.instance.currentUser;
     setState(() => _salvando = true);
     try {
-      await WorkHolyBanco.instancia.salvarTexto(_perfilKey, jsonEncode(_dados));
+      await WorkHolyBanco.instancia.salvarTexto(
+        chavePerfilPraticante,
+        jsonEncode(dados),
+      );
+      SincronizacaoUsuario.instancia.agendarEnvio();
+      if (nome.isNotEmpty && usuario?.displayName != nome) {
+        try {
+          await usuario?.updateDisplayName(nome);
+        } on FirebaseAuthException catch (erro) {
+          debugPrint(
+            'Não foi possível atualizar o nome da conta: ${erro.code}',
+          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Perfil salvo no aparelho, mas não foi possível atualizar o nome da conta. Tente novamente.',
+                ),
+              ),
+            );
+          }
+          return;
+        }
+      }
       if (mounted && validar) {
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('Perfil salvo.')));
@@ -158,7 +184,7 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
     for (final a in _avaliacoes) {
       if (a.medidas[meta.campo] != null) return a.medidas[meta.campo];
     }
-    return _numero(_medidas[meta.campo]?.text ?? '');
+    return _numero(_medidasSalvas[meta.campo]?.toString() ?? '');
   }
 
   double _progresso(MetaPessoal meta) {
@@ -178,9 +204,7 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
   };
 
   Future<void> _novaMeta() async {
-    var tipo = 'peso',
-        campo = 'Cintura',
-        prazo = DateTime.now().add(const Duration(days: 90));
+    var tipo = 'peso', prazo = DateTime.now().add(const Duration(days: 90));
     final inicial = TextEditingController(text: _peso.text),
         alvo = TextEditingController();
     final form = GlobalKey<FormState>();
@@ -204,10 +228,6 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
                         child: Text('Peso corporal'),
                       ),
                       DropdownMenuItem(
-                        value: 'medida',
-                        child: Text('Medida corporal'),
-                      ),
-                      DropdownMenuItem(
                         value: 'frequencia_treino',
                         child: Text('Treinos por semana'),
                       ),
@@ -218,27 +238,9 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
                     ],
                     onChanged: (v) => atualizar(() {
                       tipo = v!;
-                      inicial.text = tipo == 'peso'
-                          ? _peso.text
-                          : tipo == 'medida'
-                          ? (_medidas[campo]?.text ?? '')
-                          : '0';
+                      inicial.text = tipo == 'peso' ? _peso.text : '0';
                     }),
                   ),
-                  if (tipo == 'medida')
-                    DropdownButtonFormField<String>(
-                      initialValue: campo,
-                      decoration: const InputDecoration(labelText: 'Medida'),
-                      items: _medidas.keys
-                          .map(
-                            (v) => DropdownMenuItem(value: v, child: Text(v)),
-                          )
-                          .toList(),
-                      onChanged: (v) => atualizar(() {
-                        campo = v!;
-                        inicial.text = _medidas[campo]!.text;
-                      }),
-                    ),
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: inicial,
@@ -300,8 +302,6 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
     if (criar == true) {
       final unidade = tipo == 'peso'
           ? 'kg'
-          : tipo == 'medida'
-          ? 'cm'
           : tipo == 'corrida'
           ? 'km'
           : 'treinos';
@@ -309,7 +309,7 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
         MetaPessoal(
           id: 'meta-${DateTime.now().microsecondsSinceEpoch}',
           tipo: tipo,
-          campo: tipo == 'medida' ? campo : tipo,
+          campo: tipo,
           valorInicial: _numero(inicial.text)!,
           valorAlvo: _numero(alvo.text)!,
           unidade: unidade,
@@ -317,6 +317,7 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
           criadaEm: DateTime.now(),
         ),
       );
+      SincronizacaoUsuario.instancia.agendarEnvio();
       await _carregar();
     }
     inicial.dispose();
@@ -326,10 +327,7 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
   Future<void> _novaAvaliacao() async {
     var data = DateTime.now();
     final peso = TextEditingController(text: _peso.text);
-    final medidas = {
-      for (final e in _medidas.entries)
-        e.key: TextEditingController(text: e.value.text),
-    };
+    String? erroPeso;
     final salvar = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -361,24 +359,10 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Peso',
                       suffixText: 'kg',
-                    ),
-                  ),
-                  ...medidas.entries.map(
-                    (e) => Padding(
-                      padding: const EdgeInsets.only(top: 10),
-                      child: TextField(
-                        controller: e.value,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        decoration: InputDecoration(
-                          labelText: e.key,
-                          suffixText: 'cm',
-                        ),
-                      ),
+                      errorText: erroPeso,
                     ),
                   ),
                 ],
@@ -391,7 +375,14 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
               child: const Text('Cancelar'),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(context, true),
+              onPressed: () {
+                final valor = _numero(peso.text);
+                if (valor == null || !valor.isFinite || valor <= 0) {
+                  atualizar(() => erroPeso = 'Informe um peso válido.');
+                  return;
+                }
+                Navigator.pop(context, true);
+              },
               child: const Text('Salvar'),
             ),
           ],
@@ -399,41 +390,37 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
       ),
     );
     if (salvar == true) {
-      final valores = <String, double>{
-        for (final e in medidas.entries)
-          if (_numero(e.value.text) != null) e.key: _numero(e.value.text)!,
-      };
       final valorPeso = _numero(peso.text);
-      if (valorPeso != null || valores.isNotEmpty) {
+      if (valorPeso != null) {
         await WorkHolyBanco.instancia.salvarAvaliacaoFisica(
           AvaliacaoFisica(
             id: 'avaliacao-${DateTime.now().microsecondsSinceEpoch}',
             data: data,
             pesoKg: valorPeso,
-            medidas: valores,
+            medidas: const {},
           ),
         );
-        if (valorPeso != null) _peso.text = peso.text;
-        for (final e in medidas.entries) {
-          _medidas[e.key]!.text = e.value.text;
+        if (mounted) {
+          _peso.text = peso.text;
+          await _salvar(validar: false);
+          await _carregar();
+        } else {
+          SincronizacaoUsuario.instancia.agendarEnvio();
         }
-        await _salvar(validar: false);
-        await _carregar();
       }
     }
     peso.dispose();
-    for (final c in medidas.values) {
-      c.dispose();
-    }
   }
 
   Future<void> _excluirMeta(MetaPessoal meta) async {
     await WorkHolyBanco.instancia.excluirMetaPessoal(meta.id);
+    SincronizacaoUsuario.instancia.agendarEnvio();
     await _carregar();
   }
 
   Future<void> _excluirAvaliacao(AvaliacaoFisica item) async {
     await WorkHolyBanco.instancia.excluirAvaliacaoFisica(item.id);
+    SincronizacaoUsuario.instancia.agendarEnvio();
     await _carregar();
   }
 
@@ -479,6 +466,7 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
   }) => TextFormField(
     controller: c,
     keyboardType: teclado,
+    onChanged: (_) => setState(() {}),
     decoration: InputDecoration(
       labelText: titulo,
       suffixText: sufixo,
@@ -573,7 +561,10 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
       ),
       const SizedBox(height: 14),
       _grafico('Peso', _pontosPeso(), 'kg'),
-      ..._medidas.keys.map(
+      ...{
+        ..._medidasSalvas.keys,
+        ..._avaliacoes.expand((a) => a.medidas.keys),
+      }.map(
         (chave) => _grafico(
           chave,
           _avaliacoes.reversed
@@ -683,79 +674,122 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
     ]);
   }
 
-  Widget _acessoPremiumBloqueado() => Card(
-    margin: const EdgeInsets.only(bottom: 16),
-    child: Padding(
-      padding: const EdgeInsets.all(18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              Icon(Icons.lock_outline, color: _verdePerfil),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Evolução Premium',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            'Crie metas, registre avaliações físicas e acompanhe seus gráficos de desempenho.',
-            style: TextStyle(color: _textoPerfil),
-          ),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => const PlanoPremiumPage(
-                  recurso: 'Metas, avaliações e gráficos de evolução',
-                ),
-              ),
-            ),
-            icon: const Icon(Icons.workspace_premium_outlined),
-            label: const Text('Conhecer Premium — R\$ 9,90'),
-            style: FilledButton.styleFrom(
-              backgroundColor: _verdePerfil,
-              foregroundColor: Colors.black,
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
-
   @override
   Widget build(BuildContext context) {
-    if (_carregando) {
-      return const Center(
-        child: CircularProgressIndicator(color: _verdePerfil),
-      );
+    final corpo = _carregando
+        ? const Center(child: CircularProgressIndicator(color: _verdePerfil))
+        : _conteudo();
+    return Scaffold(
+      appBar: AppBar(title: const Text('Meu perfil')),
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: corpo,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _cabecalho() {
+    final nome = _nome.text.trim();
+    final inicial = nome.isEmpty ? '?' : nome.characters.first.toUpperCase();
+    final agora = DateTime.now();
+    int? idade;
+    if (_nascimento != null) {
+      idade = agora.year - _nascimento!.year;
+      if (agora.month < _nascimento!.month ||
+          (agora.month == _nascimento!.month && agora.day < _nascimento!.day)) {
+        idade--;
+      }
+      if (idade < 0) idade = null;
     }
+    final objetivo =
+        _objetivo == 'Outro' && _objetivoPersonalizado.text.trim().isNotEmpty
+        ? _objetivoPersonalizado.text.trim()
+        : _objetivo;
+    Widget info(IconData icone, String texto) => Chip(
+      avatar: Icon(icone, size: 16, color: _verdePerfil),
+      label: Text(texto),
+      visualDensity: VisualDensity.compact,
+    );
+    final altura = _altura.text.trim();
+    final peso = _peso.text.trim();
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 30,
+                  backgroundColor: _verdePerfil,
+                  child: Text(
+                    inicial,
+                    style: const TextStyle(
+                      color: Colors.black,
+                      fontSize: 26,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        nome.isEmpty ? 'Complete seu perfil' : nome,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Objetivo: $objetivo • $_experiencia',
+                        style: const TextStyle(color: _textoPerfil),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  if (idade != null) info(Icons.cake_outlined, '$idade anos'),
+                  if (altura.isNotEmpty) info(Icons.height, '$altura cm'),
+                  if (peso.isNotEmpty)
+                    info(Icons.monitor_weight_outlined, '$peso kg'),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _conteudo() {
     return Form(
       key: _formKey,
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          const Text(
-            'Meu perfil',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Metas, evolução e consistência em um só lugar.',
-            style: TextStyle(color: _textoPerfil),
-          ),
-          const SizedBox(height: 8),
-          if (_possuiPremium) ...[
-            _secaoMetas(),
-            _evolucao(),
-          ] else
-            _acessoPremiumBloqueado(),
+          _cabecalho(),
           _consistencia(),
+          _secaoMetas(),
+          _evolucao(),
           _secao('Dados pessoais', Icons.person_outline, [
             _campo('Nome', _nome),
             ListTile(
@@ -840,24 +874,6 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
               onChanged: (v) => setState(() => _experiencia = v!),
             ),
           ]),
-          _secao('Medidas atuais', Icons.straighten, [
-            const Text(
-              'Use “Nova avaliação” para preservar o histórico.',
-              style: TextStyle(color: _textoPerfil),
-            ),
-            const SizedBox(height: 14),
-            ..._medidas.entries.map(
-              (e) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: _campo(
-                  e.key,
-                  e.value,
-                  sufixo: 'cm',
-                  teclado: const TextInputType.numberWithOptions(decimal: true),
-                ),
-              ),
-            ),
-          ]),
           SizedBox(
             height: 52,
             child: FilledButton.icon(
@@ -888,9 +904,6 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
     _altura.dispose();
     _peso.dispose();
     _objetivoPersonalizado.dispose();
-    for (final c in _medidas.values) {
-      c.dispose();
-    }
     super.dispose();
   }
 }

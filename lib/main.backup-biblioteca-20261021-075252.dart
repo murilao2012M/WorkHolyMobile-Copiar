@@ -10,6 +10,7 @@ import 'aparencia/aparencia_page.dart';
 import 'preferencias/preferencias_treino_page.dart';
 import 'tutorial_primeiro_acesso_page.dart';
 import 'tela_boas_vindas_page.dart';
+
 const Color verde = Color(0xFFB7F34A);
 const Color fundo = Color(0xFF10120F);
 const Color superficie = Color(0xFF1B1E19);
@@ -346,7 +347,7 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
       'workholy_tutorial_primeiro_acesso_v1';
 
   static const String chaveBoasVindasConcluida =
-    'workholy_boas_vindas_concluida_v1';
+      'workholy_boas_vindas_concluida_v1';
 
   bool _verificacaoTutorialIniciada = false;
 
@@ -355,11 +356,9 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
   int abaSelecionada = 0;
   bool carregando = true;
 
-  List<Treino> treinos = [
-  ];
+  List<Treino> treinos = [];
 
-  List<Exercicio> exercicios = [
-  ];
+  List<Exercicio> exercicios = [];
 
   List<ItemTreino> itensTreino = [];
 
@@ -564,78 +563,74 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
     if (mounted) setState(() {});
   }
 
-Future<void> iniciarSessaoTreino(String treinoId) async {
-  final indiceTreino = treinos.indexWhere((t) => t.id == treinoId);
-  if (indiceTreino < 0) return;
+  Future<void> iniciarSessaoTreino(String treinoId) async {
+    final indiceTreino = treinos.indexWhere((t) => t.id == treinoId);
+    if (indiceTreino < 0) return;
 
-  final treino = treinos[indiceTreino];
-  final itens = itensTreino
-      .where((item) => item.treinoId == treinoId)
-      .toList();
+    final treino = treinos[indiceTreino];
+    final itens = itensTreino
+        .where((item) => item.treinoId == treinoId)
+        .toList();
 
-  if (itens.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Adicione exercícios ao treino antes de iniciar.'),
-      ),
-    );
-    return;
-  }
-
-  final series = <SerieExecutada>[];
-
-  for (final item in itens) {
-    final indice = exercicios.indexWhere(
-      (e) => e.id == item.exercicioId,
-    );
-
-    final nome = indice >= 0
-        ? exercicios[indice].nome
-        : 'Exercício indisponível';
-
-    for (var numero = 1; numero <= item.series; numero++) {
-      series.add(
-        SerieExecutada(
-          id: novoId('serie'),
-          exercicioId: item.exercicioId,
-          nomeExercicio: nome,
-          numeroSerie: numero,
-          repeticoesPlanejadas: item.repeticoes,
-          repeticoesRealizadas: item.repeticoes,
-          cargaKg: item.cargaKg,
-          descansoSegundos: item.descansoSegundos,
-          concluida: false,
+    if (itens.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Adicione exercícios ao treino antes de iniciar.'),
         ),
       );
+      return;
     }
-  }
 
-  final sessao = SessaoTreino(
-    id: novoId('sessao'),
-    treinoId: treino.id,
-    nomeTreino: treino.nome,
-    inicio: DateTime.now(),
-    fim: null,
-    series: series,
-  );
+    final series = <SerieExecutada>[];
 
-  setState(() => sessoesTreino.add(sessao));
-  await salvarDados();
+    for (final item in itens) {
+      final indice = exercicios.indexWhere((e) => e.id == item.exercicioId);
 
-  if (!mounted) return;
+      final nome = indice >= 0
+          ? exercicios[indice].nome
+          : 'Exercício indisponível';
 
-  await Navigator.push<void>(
-    context,
-    MaterialPageRoute(
-      builder: (_) => ExecucaoTreinoPage(
-        sessaoInicial: sessao,
-        onSalvar: salvarSessao,
+      for (var numero = 1; numero <= item.series; numero++) {
+        series.add(
+          SerieExecutada(
+            id: novoId('serie'),
+            exercicioId: item.exercicioId,
+            nomeExercicio: nome,
+            numeroSerie: numero,
+            repeticoesPlanejadas: item.repeticoes,
+            repeticoesRealizadas: item.repeticoes,
+            cargaKg: item.cargaKg,
+            descansoSegundos: item.descansoSegundos,
+            concluida: false,
+          ),
+        );
+      }
+    }
+
+    final sessao = SessaoTreino(
+      id: novoId('sessao'),
+      treinoId: treino.id,
+      nomeTreino: treino.nome,
+      inicio: DateTime.now(),
+      fim: null,
+      series: series,
+    );
+
+    setState(() => sessoesTreino.add(sessao));
+    await salvarDados();
+
+    if (!mounted) return;
+
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            ExecucaoTreinoPage(sessaoInicial: sessao, onSalvar: salvarSessao),
       ),
-    ),
-  );
+    );
 
-  if (mounted) setState(() {});
-}
+    if (mounted) setState(() {});
+  }
 
   Future<void> salvarSessao(SessaoTreino sessao) async {
     final indice = sessoesTreino.indexWhere((s) => s.id == sessao.id);
@@ -651,14 +646,12 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
     if (mounted) setState(() {});
   }
 
-    Future<void> limparHistorico() async {
+  Future<void> limparHistorico() async {
     final quantidade = sessoesTreino.where((s) => s.finalizada).length;
 
     if (quantidade == 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Não há treinos concluídos para limpar.'),
-        ),
+        const SnackBar(content: Text('Não há treinos concluídos para limpar.')),
       );
       return;
     }
@@ -968,8 +961,18 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
     });
 
     const meses = [
-      'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
-      'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez',
+      'Jan',
+      'Fev',
+      'Mar',
+      'Abr',
+      'Mai',
+      'Jun',
+      'Jul',
+      'Ago',
+      'Set',
+      'Out',
+      'Nov',
+      'Dez',
     ];
 
     final valoresMeses = List<int>.generate(6, (indice) {
@@ -1061,10 +1064,7 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
               children: [
                 const Text(
                   'Tempo total de treino',
-                  style: TextStyle(
-                    color: textoSecundario,
-                    fontSize: 14,
-                  ),
+                  style: TextStyle(color: textoSecundario, fontSize: 14),
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -1095,10 +1095,7 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
               children: [
                 const Text(
                   'Último treino concluído',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 12),
                 if (ultimaSessao == null)
@@ -1157,7 +1154,6 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
     );
   }
 
-
   String _formatarDuracao(int segundos) {
     final duracao = Duration(seconds: segundos);
     final horas = duracao.inHours;
@@ -1188,10 +1184,7 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
           children: [
             Text(
               titulo,
-              style: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.bold,
-              ),
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 20),
             SizedBox(
@@ -1246,10 +1239,7 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
               const SizedBox(height: 8),
               const Text(
                 'Ainda não há sessões concluídas neste período.',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: textoSecundario,
-                ),
+                style: TextStyle(fontSize: 12, color: textoSecundario),
               ),
             ],
           ],
@@ -1257,6 +1247,7 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
       ),
     );
   }
+
   Widget cartaoResumo(String titulo, String valor, IconData icone) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -1489,10 +1480,7 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
             const Expanded(
               child: Text(
                 'Histórico',
-                style: TextStyle(
-                  fontSize: 25,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 25, fontWeight: FontWeight.bold),
               ),
             ),
             if (sessoesTreino.any((sessao) => sessao.finalizada))
@@ -1517,10 +1505,7 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
                   SizedBox(height: 12),
                   Text(
                     'Nenhuma sessão registrada',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   SizedBox(height: 8),
                   Text(
@@ -1559,18 +1544,13 @@ Future<void> iniciarSessaoTreino(String treinoId) async {
                           ),
                         ),
                         if (sessao.finalizada &&
-                            treinos.any(
-                              (t) => t.id == sessao.treinoId,
-                            ))
+                            treinos.any((t) => t.id == sessao.treinoId))
                           IconButton(
                             tooltip: 'Refazer treino',
                             onPressed: () {
                               iniciarSessaoTreino(sessao.treinoId);
                             },
-                            icon: const Icon(
-                              Icons.replay,
-                              color: verde,
-                            ),
+                            icon: const Icon(Icons.replay, color: verde),
                           ),
                       ],
                     ),
@@ -1614,20 +1594,17 @@ class ConfiguracoesPage extends StatelessWidget {
   }
 
   Future<void> abrirTutorial(BuildContext context) async {
-      final resultado = await Navigator.of(context).push<bool>(
-        MaterialPageRoute<bool>(
-          builder: (_) => const TutorialPrimeiroAcessoPage(),
-        ),
-      );
+    final resultado = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => const TutorialPrimeiroAcessoPage(),
+      ),
+    );
 
-      if (resultado == true) {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool(
-          'workholy_tutorial_primeiro_acesso_v1',
-          true,
-        );
-      }
+    if (resultado == true) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('workholy_tutorial_primeiro_acesso_v1', true);
     }
+  }
 
   void mostrarSobre(BuildContext context) {
     showAboutDialog(
@@ -1723,7 +1700,9 @@ class ConfiguracoesPage extends StatelessWidget {
                 ListTile(
                   leading: const Icon(Icons.school_outlined, color: verde),
                   title: const Text('Ver tutorial novamente'),
-                  subtitle: const Text('Revise as principais funções do aplicativo'),
+                  subtitle: const Text(
+                    'Revise as principais funções do aplicativo',
+                  ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => abrirTutorial(context),
                 ),
@@ -2002,7 +1981,7 @@ class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
   int descansoPreferido = 90;
 
   static const String chaveTutorialConcluido =
-    'workholy_tutorial_primeiro_acesso_v1';
+      'workholy_tutorial_primeiro_acesso_v1';
 
   bool _verificacaoTutorialIniciada = false;
 
@@ -2023,8 +2002,7 @@ class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
     try {
       final prefs = await SharedPreferences.getInstance();
 
-      if (!mounted ||
-          prefs.getBool(chaveTutorialConcluido) == true) {
+      if (!mounted || prefs.getBool(chaveTutorialConcluido) == true) {
         return;
       }
 

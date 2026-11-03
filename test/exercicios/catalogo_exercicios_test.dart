@@ -1,4 +1,3 @@
-
 import 'dart:convert';
 
 import 'package:flutter/services.dart';
@@ -33,18 +32,14 @@ void main() {
     expect(exercicio.nome, 'Rosca alternada');
     expect(exercicio.grupo, 'Braços');
     expect(exercicio.musculosSecundarios, ['forearms']);
-    expect(
-      exercicio.instrucoes,
-      ['Mantenha os cotovelos próximos ao tronco.'],
-    );
+    expect(exercicio.instrucoes, ['Mantenha os cotovelos próximos ao tronco.']);
     expect(exercicio.imagens, ['alternate_curl/0.jpg']);
-    expect(
-      exercicio.caminhosImagensAssets,
-      ['assets/exercicios/imagens/alternate_curl/0.jpg'],
-    );
+    expect(exercicio.caminhosImagensAssets, [
+      'assets/exercicios/imagens/alternate_curl/0.jpg',
+    ]);
   });
 
-  test('carrega os 876 exercícios com traduções e IDs preservados', () async {
+  test('carrega os 1.786 exercícios com traduções e IDs preservados', () async {
     final catalogo = await CatalogoExercicios.instancia.carregar();
 
     final catalogoOriginalJson = await rootBundle.loadString(
@@ -57,11 +52,26 @@ void main() {
     final originais = (jsonDecode(catalogoOriginalJson) as List)
         .cast<Map<String, dynamic>>();
     final traducoes = jsonDecode(traducoesJson) as Map<String, dynamic>;
-    final traducoesPorId =
-        (traducoes['exercicios'] as Map).cast<String, dynamic>();
+    final traducoesPorId = (traducoes['exercicios'] as Map)
+        .cast<String, dynamic>();
 
-    expect(originais, hasLength(876));
-    expect(catalogo, hasLength(876));
+    expect(originais, hasLength(1786));
+    expect(catalogo, hasLength(1786));
+    expect(catalogo.map((exercicio) => exercicio.id).toSet(), hasLength(1786));
+    for (final entrada in {
+      'Peso corporal': 334,
+      'Kettlebell': 87,
+      'Halteres': 397,
+      'Não informado': 77,
+    }.entries) {
+      expect(
+        catalogo.where(
+          (exercicio) => exercicio.equipamentoParaFiltro == entrada.key,
+        ),
+        hasLength(entrada.value),
+        reason: entrada.key,
+      );
+    }
 
     final originaisPorId = {
       for (final item in originais) item['id'].toString(): item,
@@ -74,8 +84,8 @@ void main() {
 
     for (final exercicio in catalogo) {
       final original = originaisPorId[exercicio.id]!;
-      final traducao =
-          (traducoesPorId[exercicio.id] as Map).cast<String, dynamic>();
+      final traducao = (traducoesPorId[exercicio.id] as Map)
+          .cast<String, dynamic>();
 
       expect(exercicio.nome, traducao['nome'], reason: exercicio.id);
       expect(
@@ -98,5 +108,14 @@ void main() {
       catalogo.every((exercicio) => exercicio.nome.trim().isNotEmpty),
       isTrue,
     );
+    expect(
+      carregadosPorId['Clean_and_Jerk']!.nome,
+      'Arremesso olímpico (clean and jerk)',
+    );
+    expect(
+      carregadosPorId['Sumo_Deadlift_with_Bands']!.nome,
+      'Levantamento terra sumô com elásticos',
+    );
+    expect(carregadosPorId['Triceps_Pushdown']!.nome, 'Tríceps na polia');
   });
 }

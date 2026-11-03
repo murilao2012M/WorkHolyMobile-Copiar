@@ -126,3 +126,6 @@ local.properties
 android/build/
 android/app/build/
 *.bak-*
+
+# Arquivos compactados grandes
+android.zip

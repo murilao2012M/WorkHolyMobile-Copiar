@@ -1,0 +1,37 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function usuarioAutenticado(uid) {
+      return request.auth != null
+        && request.auth.uid == uid;
+    }
+
+    // Backups individuais
+    match /workholy_backups/{uid} {
+      allow read, write: if usuarioAutenticado(uid);
+
+      match /{documento=**} {
+        allow read, write: if usuarioAutenticado(uid);
+      }
+    }
+
+    // Consulta de dados legados
+    match /users/{uid}/{documento=**} {
+      allow read: if usuarioAutenticado(uid);
+      allow write: if false;
+    }
+
+    // Assinaturas: leitura individual, escrita exclusiva pelo backend
+    match /assinaturas/{uid} {
+      allow get: if usuarioAutenticado(uid);
+      allow list, create, update, delete: if false;
+    }
+
+    // Bloqueia todos os demais caminhos
+    match /{documento=**} {
+      allow read, write: if false;
+    }
+  }
+}

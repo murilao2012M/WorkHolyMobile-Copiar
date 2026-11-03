@@ -1,4 +1,3 @@
-
 import 'dart:convert';
 
 import 'package:flutter/services.dart';
@@ -18,6 +17,12 @@ class ExercicioPredefinido {
     this.mecanica = '',
     this.equipamento = '',
     this.categoria = '',
+    this.equipamentoOriginal = '',
+    this.categoriaOriginal = '',
+    this.nivelOriginal = '',
+    this.mecanicaOriginal = '',
+    this.instrucoesOriginais = const [],
+    this.musculosPrimariosOriginais = const [],
     this.series = 3,
     this.repeticoes = 12,
   });
@@ -30,6 +35,12 @@ class ExercicioPredefinido {
   final String mecanica;
   final String equipamento;
   final String categoria;
+  final String equipamentoOriginal;
+  final String categoriaOriginal;
+  final String nivelOriginal;
+  final String mecanicaOriginal;
+  final List<String> instrucoesOriginais;
+  final List<String> musculosPrimariosOriginais;
   final List<String> musculosPrimarios;
   final List<String> musculosSecundarios;
   final List<String> instrucoes;
@@ -37,16 +48,49 @@ class ExercicioPredefinido {
   final int series;
   final int repeticoes;
 
+  /// Equipamento principal informado no catálogo, com nomes equivalentes unidos.
+  String get equipamentoParaFiltro {
+    final original = equipamentoOriginal.trim().toLowerCase();
+    if (original.isEmpty) {
+      return equipamento.trim().isEmpty ? 'Não informado' : equipamento.trim();
+    }
+    return switch (original) {
+      'body only' || 'body weight' => 'Peso corporal',
+      'dumbbell' => 'Halteres',
+      'kettlebell' || 'kettlebells' => 'Kettlebell',
+      'bands' || 'resistance band' => 'Elásticos',
+      'barbell' || 'olympic barbell' => 'Barra',
+      'e-z curl bar' || 'ez barbell' => 'Barra EZ',
+      'cable' => 'Polia',
+      'machine' || 'leverage machine' => 'Máquina',
+      'smith machine' => 'Máquina Smith',
+      'exercise ball' || 'stability ball' => 'Bola de exercício',
+      'medicine ball' => 'Bola medicinal',
+      'foam roll' => 'Rolo de liberação miofascial',
+      'roller' || 'wheel roller' => 'Roda abdominal',
+      'weighted' => 'Carga adicional',
+      'sled machine' => 'Trenó',
+      'rope' => 'Corda',
+      'bosu ball' => 'Bosu',
+      'upper body ergometer' => 'Ergômetro de braços',
+      'skierg machine' => 'Máquina de esqui',
+      'hammer' => 'Marreta',
+      'stationary bike' => 'Bicicleta ergométrica',
+      'elliptical machine' => 'Elíptico',
+      'stepmill machine' => 'Máquina de escada',
+      'other' => 'Outro',
+      _ => equipamento.trim().isEmpty ? original : equipamento.trim(),
+    };
+  }
+
   /// Prefixo dos arquivos de imagem locais.
-  static const String prefixoImagensAssets =
-      'assets/exercicios/imagens/';
+  static const String prefixoImagensAssets = 'assets/exercicios/imagens/';
 
   /// Caminhos completos das imagens incluídas no aplicativo.
   List<String> get caminhosImagensAssets {
     return List.unmodifiable(
       imagens.map(
-        (imagem) =>
-            '$prefixoImagensAssets${imagem.replaceAll(r'\', '/')}',
+        (imagem) => '$prefixoImagensAssets${imagem.replaceAll(r'\', '/')}',
       ),
     );
   }
@@ -66,16 +110,14 @@ class ExercicioPredefinido {
       throw const FormatException('Exercício sem nome no catálogo.');
     }
 
-    final nomeTraduzido =
-        traducaoExercicio['nome']?.toString().trim();
+    final nomeTraduzido = traducaoExercicio['nome']?.toString().trim();
     final nome = nomeTraduzido != null && nomeTraduzido.isNotEmpty
         ? nomeTraduzido
         : nomeOriginal;
 
     // O grupo é calculado usando os músculos originais em inglês.
     // Isso preserva a compatibilidade com os filtros existentes.
-    final musculosOriginais =
-        _listaDeTextos(dados['primaryMuscles']);
+    final musculosOriginais = _listaDeTextos(dados['primaryMuscles']);
 
     final musculosPrimarios = _traduzirLista(
       musculosOriginais,
@@ -87,8 +129,7 @@ class ExercicioPredefinido {
       campos['musculos'],
     );
 
-    final instrucoesTraduzidas =
-        traducaoExercicio['instrucoes'];
+    final instrucoesTraduzidas = traducaoExercicio['instrucoes'];
 
     final instrucoes = instrucoesTraduzidas is List
         ? _listaDeTextos(instrucoesTraduzidas)
@@ -100,18 +141,15 @@ class ExercicioPredefinido {
       grupo: _grupoEmPortugues(musculosOriginais),
       forca: dados['force']?.toString() ?? '',
       nivel: _traduzirCampo(campos['nivel'], dados['level']),
-      mecanica: _traduzirCampo(
-        campos['mecanica'],
-        dados['mechanic'],
-      ),
-      equipamento: _traduzirCampo(
-        campos['equipamento'],
-        dados['equipment'],
-      ),
-      categoria: _traduzirCampo(
-        campos['categoria'],
-        dados['category'],
-      ),
+      mecanica: _traduzirCampo(campos['mecanica'], dados['mechanic']),
+      equipamento: _traduzirCampo(campos['equipamento'], dados['equipment']),
+      equipamentoOriginal: dados['equipment']?.toString() ?? '',
+      categoriaOriginal: dados['category']?.toString() ?? '',
+      nivelOriginal: dados['level']?.toString() ?? '',
+      mecanicaOriginal: dados['mechanic']?.toString() ?? '',
+      instrucoesOriginais: _listaDeTextos(dados['instructions']),
+      musculosPrimariosOriginais: musculosOriginais,
+      categoria: _traduzirCampo(campos['categoria'], dados['category']),
       musculosPrimarios: musculosPrimarios,
       musculosSecundarios: musculosSecundarios,
       instrucoes: instrucoes,
@@ -119,10 +157,7 @@ class ExercicioPredefinido {
     );
   }
 
-  static String _traduzirCampo(
-    Object? mapaTraducao,
-    Object? valorOriginal,
-  ) {
+  static String _traduzirCampo(Object? mapaTraducao, Object? valorOriginal) {
     final original = valorOriginal?.toString() ?? '';
     if (mapaTraducao is! Map) return original;
 
@@ -138,9 +173,7 @@ class ExercicioPredefinido {
     Object? mapaTraducao,
   ) {
     return List.unmodifiable(
-      originais.map(
-        (original) => _traduzirCampo(mapaTraducao, original),
-      ),
+      originais.map((original) => _traduzirCampo(mapaTraducao, original)),
     );
   }
 
@@ -155,14 +188,11 @@ class ExercicioPredefinido {
   }
 
   static String _grupoEmPortugues(List<String> musculos) {
-    final musculo = musculos.isEmpty
-        ? ''
-        : musculos.first.toLowerCase();
+    final musculo = musculos.isEmpty ? '' : musculos.first.toLowerCase();
 
     return switch (musculo) {
       'chest' => 'Peito',
-      'lats' || 'middle back' || 'lower back' || 'traps' =>
-        'Costas',
+      'lats' || 'middle back' || 'lower back' || 'traps' => 'Costas',
       'shoulders' => 'Ombros',
       'biceps' || 'triceps' || 'forearms' => 'Braços',
       'abdominals' => 'Abdômen',
@@ -183,14 +213,11 @@ class ExercicioPredefinido {
 class CatalogoExercicios {
   CatalogoExercicios._();
 
-  static final CatalogoExercicios instancia =
-      CatalogoExercicios._();
+  static final CatalogoExercicios instancia = CatalogoExercicios._();
 
-  static const caminhoAsset =
-      'assets/exercicios/free_exercise_db.json';
+  static const caminhoAsset = 'assets/exercicios/free_exercise_db.json';
 
-  static const caminhoTraducoesAsset =
-      'assets/exercicios/traducoes_pt_BR.json';
+  static const caminhoTraducoesAsset = 'assets/exercicios/traducoes_pt_BR.json';
 
   Future<List<ExercicioPredefinido>>? _carregamento;
 
@@ -208,9 +235,7 @@ class CatalogoExercicios {
     final dadosTraducoes = jsonDecode(conteudos[1]);
 
     if (dados is! List) {
-      throw const FormatException(
-        'O catálogo de exercícios não é uma lista.',
-      );
+      throw const FormatException('O catálogo de exercícios não é uma lista.');
     }
 
     if (dadosTraducoes is! Map) {

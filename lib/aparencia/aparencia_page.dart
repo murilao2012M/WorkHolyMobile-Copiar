@@ -1,13 +1,11 @@
+import 'package:flutter/material.dart' hide Icon;
 
-import 'package:flutter/material.dart';
+import '../painel/w_icone.dart';
 
 import 'workholy_aparencia.dart';
 
 class AparenciaPage extends StatelessWidget {
-  const AparenciaPage({
-    super.key,
-    required this.aparencia,
-  });
+  const AparenciaPage({super.key, required this.aparencia});
 
   final WorkHolyAparencia aparencia;
 
@@ -20,9 +18,7 @@ class AparenciaPage extends StatelessWidget {
         final destaque = aparencia.corDestaque;
 
         return Scaffold(
-          appBar: AppBar(
-            title: const Text('Aparência'),
-          ),
+          appBar: AppBar(title: const Text('Aparência')),
           body: ListView(
             padding: const EdgeInsets.all(20),
             children: [
@@ -52,16 +48,14 @@ class AparenciaPage extends StatelessWidget {
                 descricao: 'Fundo escuro e visual esportivo.',
                 icone: Icons.dark_mode_outlined,
                 selecionado: aparencia.modo == ModoAparencia.escuro,
-                aoSelecionar: () =>
-                    aparencia.definirModo(ModoAparencia.escuro),
+                aoSelecionar: () => aparencia.definirModo(ModoAparencia.escuro),
               ),
               _OpcaoTema(
                 titulo: 'Claro',
                 descricao: 'Fundo claro e maior luminosidade.',
                 icone: Icons.light_mode_outlined,
                 selecionado: aparencia.modo == ModoAparencia.claro,
-                aoSelecionar: () =>
-                    aparencia.definirModo(ModoAparencia.claro),
+                aoSelecionar: () => aparencia.definirModo(ModoAparencia.claro),
               ),
               _OpcaoTema(
                 titulo: 'Automático',
@@ -90,67 +84,61 @@ class AparenciaPage extends StatelessWidget {
               Wrap(
                 spacing: 16,
                 runSpacing: 16,
-                children: List.generate(
-                  WorkHolyAparencia.cores.length,
-                  (indice) {
-                    final cor = WorkHolyAparencia.cores[indice];
-                    final selecionada = aparencia.indiceCor == indice;
+                children: List.generate(WorkHolyAparencia.cores.length, (
+                  indice,
+                ) {
+                  final cor = WorkHolyAparencia.cores[indice];
+                  final selecionada = aparencia.indiceCor == indice;
 
-                    const nomes = [
-                      'Verde-limão',
-                      'Azul',
-                      'Roxo',
-                      'Vermelho',
-                      'Laranja',
-                    ];
+                  const nomes = [
+                    'Verde-limão',
+                    'Azul',
+                    'Roxo',
+                    'Vermelho',
+                    'Laranja',
+                  ];
 
-                    return Semantics(
-                      button: true,
-                      selected: selecionada,
-                      label: nomes[indice],
-                      child: InkWell(
-                        onTap: () => aparencia.definirCor(indice),
-                        borderRadius: BorderRadius.circular(14),
-                        child: Container(
-                          width: 92,
-                          padding: const EdgeInsets.symmetric(
-                            vertical: 12,
-                            horizontal: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: selecionada
-                                  ? cor
-                                  : tema.dividerColor,
-                              width: selecionada ? 2.5 : 1,
-                            ),
-                          ),
-                          child: Column(
-                            children: [
-                              CircleAvatar(
-                                radius: 18,
-                                backgroundColor: cor,
-                                child: selecionada
-                                    ? const Icon(
-                                        Icons.check,
-                                        color: Colors.black,
-                                      )
-                                    : null,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                nomes[indice],
-                                textAlign: TextAlign.center,
-                                style: tema.textTheme.labelSmall,
-                              ),
-                            ],
+                  return Semantics(
+                    button: true,
+                    selected: selecionada,
+                    label: nomes[indice],
+                    child: InkWell(
+                      onTap: () => aparencia.definirCor(indice),
+                      borderRadius: BorderRadius.circular(14),
+                      child: Container(
+                        width: 92,
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 12,
+                          horizontal: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: selecionada ? cor : tema.dividerColor,
+                            width: selecionada ? 2.5 : 1,
                           ),
                         ),
+                        child: Column(
+                          children: [
+                            CircleAvatar(
+                              radius: 18,
+                              backgroundColor: cor,
+                              child: selecionada
+                                  ? const Icon(Icons.check, color: Colors.black)
+                                  : null,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              nomes[indice],
+                              textAlign: TextAlign.center,
+                              style: tema.textTheme.labelSmall,
+                            ),
+                          ],
+                        ),
                       ),
-                    );
-                  },
-                ),
+                    ),
+                  );
+                }),
               ),
 
               const SizedBox(height: 28),
@@ -182,18 +170,13 @@ class AparenciaPage extends StatelessWidget {
                               children: [
                                 Text(
                                   'Meu treinamento',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                                  style: TextStyle(fontWeight: FontWeight.bold),
                                 ),
                                 Text('Exemplo de cartão'),
                               ],
                             ),
                           ),
-                          Icon(
-                            Icons.check_circle,
-                            color: destaque,
-                          ),
+                          Icon(Icons.check_circle, color: destaque),
                         ],
                       ),
                       const SizedBox(height: 16),

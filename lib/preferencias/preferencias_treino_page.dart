@@ -1,4 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icon;
+
+import '../painel/w_icone.dart';
 
 import '../dados/workholy_banco.dart';
 

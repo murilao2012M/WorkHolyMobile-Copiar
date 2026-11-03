@@ -1,0 +1,13 @@
+{
+  "modo": "amostra",
+  "origem_total": 1324,
+  "catalogo_atual": 876,
+  "staging_rapidapi_preservado": 275,
+  "candidatos_apos_filtro_nome": 917,
+  "processados": 10,
+  "observacao": "Amostra de avaliação; não integrar ao catálogo ativo.",
+  "arquivos": [
+    "C:\\Users\\TI\\WorkHolyMobile\\assets\\exercicios\\staging_dataset_complementar\\amostra_argos_10.json",
+    "C:\\Users\\TI\\WorkHolyMobile\\assets\\exercicios\\staging_dataset_complementar\\amostra_traducoes_argos_10.json"
+  ]
+}
