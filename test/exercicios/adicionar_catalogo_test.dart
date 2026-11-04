@@ -66,18 +66,18 @@ void main() {
 
       expect(
         await banco.adicionarExerciciosDoCatalogo(candidatos),
-        hasLength(1786),
+        hasLength(876),
       );
       final versaoDepois = await banco.versaoAlteracoes();
-      expect(versaoDepois, versaoAntes + 1786);
+      expect(versaoDepois, versaoAntes + 876);
       expect(await banco.adicionarExerciciosDoCatalogo(candidatos), isEmpty);
       expect(await banco.versaoAlteracoes(), versaoDepois);
       var dados = await banco.carregarDadosTreino();
-      expect(dados.exercicios, hasLength(1787));
+      expect(dados.exercicios, hasLength(877));
       expect(dados.exercicios.first, antigo);
       expect(
         dados.exercicios.skip(1).map((e) => e['catalogoId']).toSet(),
-        hasLength(1786),
+        hasLength(876),
       );
       expect(dados.treinos, [treino]);
       expect(dados.itensTreino, [item]);
@@ -88,7 +88,7 @@ void main() {
 
       final reaberto = WorkHolyBanco.paraTestes(caminho: caminho);
       dados = await reaberto.carregarDadosTreino();
-      expect(dados.exercicios, hasLength(1787));
+      expect(dados.exercicios, hasLength(877));
       expect(dados.exercicios.first, antigo);
       expect(dados.itensTreino, [item]);
       expect(await reaberto.versaoAlteracoes(), versaoDepois);
@@ -218,11 +218,11 @@ void main() {
       () async => Future<void>.delayed(const Duration(milliseconds: 50)),
     );
     await tester.pump(const Duration(milliseconds: 100));
-    expect(find.text('Adicionar todos (1785 restantes)'), findsOneWidget);
+    expect(find.text('Adicionar todos (875 restantes)'), findsOneWidget);
     await tester.enterText(find.byType(TextField), 'termo inexistente 12345');
     await tester.pumpAndSettle();
     expect(find.text('Nenhum exercício encontrado.'), findsOneWidget);
-    await tester.tap(find.text('Adicionar todos (1785 restantes)'));
+    await tester.tap(find.text('Adicionar todos (875 restantes)'));
     await tester.pumpAndSettle();
     expect(
       find.textContaining('inclusive os que não aparecem nos filtros'),
@@ -231,21 +231,21 @@ void main() {
     await tester.tap(find.text('Cancelar'));
     await tester.pumpAndSettle();
     expect(recebidos, isNull);
-    await tester.tap(find.text('Adicionar todos (1785 restantes)'));
+    await tester.tap(find.text('Adicionar todos (875 restantes)'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Adicionar todos'));
     await tester.pump();
-    expect(recebidos, hasLength(1785));
+    expect(recebidos, hasLength(875));
     expect(recebidos!.map((e) => e.id), isNot(contains(existente.id)));
     expect(find.text('Adicionando exercícios. Aguarde...'), findsOneWidget);
     expect(
       tester.widget<OutlinedButton>(find.byType(OutlinedButton)).onPressed,
       isNull,
     );
-    concluido.complete(1785);
+    concluido.complete(875);
     await tester.pumpAndSettle();
     expect(
-      find.text('1785 exercícios adicionados. 1 já estavam no acervo.'),
+      find.text('875 exercícios adicionados. 1 já estavam no acervo.'),
       findsOneWidget,
     );
     expect(find.text('Adicionar todos (0 restantes)'), findsOneWidget);
@@ -279,7 +279,7 @@ void main() {
       );
       await tester.tap(find.text('Halteres').last);
       await tester.pumpAndSettle();
-      expect(find.text('397 de 1786 exercícios disponíveis'), findsOneWidget);
+      expect(find.text('123 de 876 exercícios disponíveis'), findsOneWidget);
 
       await tester.tap(find.widgetWithText(FilterChip, 'Braços'));
       await tester.pumpAndSettle();
@@ -291,18 +291,18 @@ void main() {
           )
           .toList();
       expect(
-        find.text('${bracos.length} de 1786 exercícios disponíveis'),
+        find.text('${bracos.length} de 876 exercícios disponíveis'),
         findsOneWidget,
       );
 
       await tester.enterText(find.byType(TextField), 'termo inexistente 12345');
       await tester.pumpAndSettle();
-      expect(find.text('0 de 1786 exercícios disponíveis'), findsOneWidget);
-      await tester.tap(find.text('Adicionar todos (1786 restantes)'));
+      expect(find.text('0 de 876 exercícios disponíveis'), findsOneWidget);
+      await tester.tap(find.text('Adicionar todos (876 restantes)'));
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(FilledButton, 'Adicionar todos'));
       await tester.pumpAndSettle();
-      expect(recebidos, hasLength(1786));
+      expect(recebidos, hasLength(876));
 
       await tester.enterText(find.byType(TextField), '');
       await tester.tap(find.byType(DropdownButtonFormField<String>));
@@ -318,7 +318,7 @@ void main() {
           .where((item) => item.grupo == 'Braços')
           .length;
       expect(
-        find.text('$totalBracos de 1786 exercícios disponíveis'),
+        find.text('$totalBracos de 876 exercícios disponíveis'),
         findsOneWidget,
       );
     },
@@ -339,8 +339,8 @@ void main() {
       () async => Future<void>.delayed(const Duration(milliseconds: 50)),
     );
     await tester.pump(const Duration(milliseconds: 100));
-    expect(find.text('Adicionar todos (1786 restantes)'), findsOneWidget);
-    await tester.tap(find.text('Adicionar todos (1786 restantes)'));
+    expect(find.text('Adicionar todos (876 restantes)'), findsOneWidget);
+    await tester.tap(find.text('Adicionar todos (876 restantes)'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Adicionar todos'));
     await tester.pumpAndSettle();

@@ -1,4 +1,4 @@
-# 📋 WorkFit Personal - Resumo Final de Entrega
+﻿# 📋 WorkFit Personal - Resumo Final de Entrega
 
 ## 🎯 O Que Foi Realizado
 
@@ -13,7 +13,7 @@ Implementação **completa e testada** do **WorkFit Personal** - um sistema inte
 - [x] **Testes** (`workfit_motor_test.dart`) - **9/9 PASSANDO** ✅
 - [x] **Documentação** - 3 guias completos
 - [x] **Segurança** - R8, ProGuard, obfuscation (já implementado)
-- [x] **Catálogo** - 1.786 exercícios integrados
+- [x] **Catálogo** - 876 exercícios integrados
 
 ## 📦 Arquivos Entregues
 
@@ -61,7 +61,7 @@ $ flutter test test/workfit/ test/exercicios/
   ✓ Serializa e desserializa JSON corretamente
 
 ✓ Catálogo de Exercícios
-  ✓ Carrega 1.786 exercícios com traduções
+  ✓ Carrega 876 exercícios com traduções
 ```
 
 ## 🎮 Fluxo do Usuário
@@ -144,13 +144,9 @@ $ flutter test test/workfit/ test/exercicios/
 - ✅ Build scripts separados (dev com unlock, produção com signing)
 
 ## 📊 Catálogo de Exercícios Integrado
-
-- **1.786 exercícios totais**
-  - 876 do Free Exercise DB (original)
-  - 910 do Argos (português, novo)
+- **876 exercícios** do Free Exercise DB (o conjunto complementar foi retirado por falta de licença confirmada)
 - **Tradução completa** para português
 - **Equipamentos normalizados** (8 categorias)
-- **Schema unificado** entre duas fontes
 - **Teste de carregamento**: ✅ Validado
 
 ## 🔧 Como Integrar ao main.dart

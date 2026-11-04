@@ -1,4 +1,4 @@
-# WorkFit Personal - Implementação Concluída
+﻿# WorkFit Personal - Implementação Concluída
 
 ## Visão Geral
 
@@ -85,7 +85,7 @@ Integrar `WorkFitPerfil` e `WorkFitSugestao` com `lib/dados/workholy_banco.dart`
 
 ## Catálogo (Já Integrado)
 
-- 1.786 exercícios totais (876 original Free Exercise DB + 910 Argos português)
+- 876 exercícios (Free Exercise DB)
 - Traduzidos para português
 - Equipamentos mapeados para 8 categorias canônicas
 - Testes validam carregamento completo

@@ -1,4 +1,4 @@
-# 🎯 WorkFit Personal - Sugestões de treino
+﻿# 🎯 WorkFit Personal - Sugestões de treino
 
 ## Visão geral
 
@@ -167,7 +167,7 @@ Veja [WORKFIT_INTEGRATION_GUIDE.md](/WORKFIT_INTEGRATION_GUIDE.md) para instruç
 
 ## 📚 Catálogo de Exercícios
 
-- **1.786 exercícios** totais (876 Free Exercise DB + 910 Argos português)
+- **876 exercícios** (Free Exercise DB)
 - Todas as traduzido para português
 - Equipamentos normalizados (academia, casa, rua, etc.)
 - Testes validam carregamento completo
