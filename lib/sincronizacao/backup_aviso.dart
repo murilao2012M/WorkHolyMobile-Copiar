@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'coordenador_backup.dart';
+import '../edicao_app.dart';
 import 'sincronizacao_usuario.dart';
 
 class BackupAviso extends StatefulWidget {
@@ -25,10 +26,17 @@ class _BackupAvisoState extends State<BackupAviso> {
       context: context,
       builder: (contexto) => AlertDialog(
         title: const Text('Ativar backup na nuvem?'),
-        content: const Text(
-          'O perfil, os treinos e as corridas, incluindo rotas, serão enviados '
-          'ao Firebase vinculado à sua conta. As versões anteriores serão '
-          'preservadas. O backup depende de conexão com a internet.',
+        content: Text(
+          EdicaoApp.personal
+              ? 'Os dados dos alunos, treinos, sessões e avaliações serão '
+                    'enviados ao Firebase vinculado à sua conta. Fotos e '
+                    'vídeos ficam apenas neste aparelho e não fazem parte do '
+                    'backup. As versões anteriores serão preservadas. O '
+                    'backup depende de conexão com a internet.'
+              : 'O perfil, os treinos e as corridas, incluindo rotas, serão '
+                    'enviados ao Firebase vinculado à sua conta. As versões '
+                    'anteriores serão preservadas. O backup depende de '
+                    'conexão com a internet.',
         ),
         actions: [
           TextButton(

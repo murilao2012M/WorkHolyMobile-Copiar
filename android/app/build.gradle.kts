@@ -42,6 +42,23 @@ android {
         versionName = flutter.versionName
     }
 
+    flavorDimensions += "edicao"
+    buildFeatures {
+        resValues = true
+    }
+    productFlavors {
+        create("workfit") {
+            dimension = "edicao"
+            resValue("string", "app_name", "WorkHoly Mobile")
+        }
+        create("personal") {
+            dimension = "edicao"
+            applicationIdSuffix = ".personal"
+            versionNameSuffix = "-personal"
+            resValue("string", "app_name", "WorkHoly Personal")
+        }
+    }
+
     if (keystorePropertiesFile.exists()) {
         signingConfigs {
             create("release") {

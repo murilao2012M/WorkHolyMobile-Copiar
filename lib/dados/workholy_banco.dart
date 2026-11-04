@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -640,7 +641,7 @@ class WorkHolyBanco {
         dados: {
           'configuracoes': configuracoes,
           'treinos': dadosTreino.treinos,
-          'exercicios': dadosTreino.exercicios,
+          'exercicios': _exerciciosSemMidiaLocal(dadosTreino.exercicios),
           'itensTreino': dadosTreino.itensTreino,
           'sessoesTreino': dadosTreino.sessoesTreino,
           'metas': metas
@@ -678,6 +679,11 @@ class WorkHolyBanco {
     final db = await database;
 
     await db.transaction((txn) async {
+      final dadosLocais = await _carregarDadosTreino(txn);
+      final exerciciosRestaurados = _restaurarMidiasLocais(
+        exercicios,
+        dadosLocais.exercicios,
+      );
       await txn.delete(_tabelaTreinos);
       await txn.delete(_tabelaExercicios);
       await txn.delete(_tabelaItensTreino);
@@ -692,7 +698,7 @@ class WorkHolyBanco {
       );
 
       await _substituirTreinos(txn, treinos);
-      await _substituirExercicios(txn, exercicios);
+      await _substituirExercicios(txn, exerciciosRestaurados);
       await _substituirItensTreino(txn, itensTreino);
       await _substituirSessoesTreino(txn, sessoesTreino);
 
@@ -878,8 +884,13 @@ class WorkHolyBanco {
           );
         }
 
+        final dadosLocais = await _carregarDadosTreino(txn);
+        final exerciciosRestaurados = _restaurarMidiasLocais(
+          exercicios,
+          dadosLocais.exercicios,
+        );
         await _substituirTreinos(txn, treinos);
-        await _substituirExercicios(txn, exercicios);
+        await _substituirExercicios(txn, exerciciosRestaurados);
         await _substituirItensTreino(txn, itensTreino);
         await _substituirSessoesTreino(txn, sessoesTreino);
         for (final entrada in [
@@ -967,6 +978,66 @@ class WorkHolyBanco {
         chave != chaveUsuarioSincronizado &&
         chave != '_workholy_backup_ativado_v1' &&
         !chave.startsWith('workholy_assinatura_');
+  }
+
+  List<Map<String, dynamic>> _exerciciosSemMidiaLocal(
+    List<Map<String, dynamic>> exercicios,
+  ) {
+    return exercicios.map((exercicio) {
+      final copia = Map<String, dynamic>.from(exercicio);
+      final links = _listaDeMapas(copia['midias'])
+          .where((midia) => midia['tipo'] == 'link')
+          .toList();
+      if (links.isEmpty) {
+        copia.remove('midias');
+      } else {
+        copia['midias'] = links;
+      }
+      return copia;
+    }).toList();
+  }
+
+  List<Map<String, dynamic>> _restaurarMidiasLocais(
+    List<Map<String, dynamic>> exerciciosRecebidos,
+    List<Map<String, dynamic>> exerciciosLocais,
+  ) {
+    final midiasLocais = <String, List<Map<String, dynamic>>>{};
+    for (final exercicio in exerciciosLocais) {
+      final id = exercicio['id'];
+      if (id is! String || id.isEmpty) continue;
+      final midias = _listaDeMapas(exercicio['midias']).where((midia) {
+        if (midia['tipo'] != 'foto' && midia['tipo'] != 'video') return false;
+        final destino = midia['destino'];
+        return destino is String && File(destino).existsSync();
+      }).toList();
+      if (midias.isNotEmpty) midiasLocais[id] = midias;
+    }
+
+    return exerciciosRecebidos.map((exercicio) {
+      final copia = Map<String, dynamic>.from(exercicio);
+      final id = copia['id'];
+      final linksRemotos = _listaDeMapas(copia['midias'])
+          .where((midia) => midia['tipo'] == 'link')
+          .toList();
+      final locais = id is String ? midiasLocais[id] ?? const [] : const [];
+      final idsIncluidos = linksRemotos
+          .map((midia) => midia['id'])
+          .whereType<String>()
+          .toSet();
+      final midias = [
+        ...linksRemotos,
+        ...locais.where((midia) {
+          final idMidia = midia['id'];
+          return idMidia is! String || idsIncluidos.add(idMidia);
+        }),
+      ];
+      if (midias.isEmpty) {
+        copia.remove('midias');
+      } else {
+        copia['midias'] = midias;
+      }
+      return copia;
+    }).toList();
   }
 
   List<Map<String, dynamic>> _listaDeMapas(Object? valor) {

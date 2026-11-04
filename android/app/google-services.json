@@ -26,6 +26,25 @@
     },
     {
       "client_info": {
+        "mobilesdk_app_id": "1:804012155841:android:683c05e308219b1f434540",
+        "android_client_info": {
+          "package_name": "br.com.workholyia.workholy_mobile.personal"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAhbXRORXF00YgRjvgEdD-pgoE0njPS7Cc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:804012155841:android:6cf12b7c27c6d0eb434540",
         "android_client_info": {
           "package_name": "com.company.workholy"

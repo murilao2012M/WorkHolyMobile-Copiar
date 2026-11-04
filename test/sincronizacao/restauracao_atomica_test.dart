@@ -90,6 +90,54 @@ void main() {
     },
   );
 
+  test(
+    'backup omite mídia local e mantém arquivo disponível neste aparelho',
+    () async {
+      final arquivo = File(p.join(diretorio.path, 'foto.jpg'));
+      await arquivo.writeAsBytes([1, 2, 3]);
+      await banco.salvarDadosTreino(
+        treinos: [],
+        exercicios: [
+          {
+            'id': 'ex-local',
+            'nome': 'Agachamento',
+            'grupo': 'Pernas',
+            'series': 3,
+            'repeticoes': 10,
+            'midias': [
+              {'id': 'foto-local', 'tipo': 'foto', 'destino': arquivo.path},
+              {
+                'id': 'video-link',
+                'tipo': 'link',
+                'destino': 'https://example.com/video',
+              },
+            ],
+          },
+        ],
+        itensTreino: [],
+        sessoesTreino: [],
+      );
+
+      final backup = await banco.exportarDadosDoUsuario();
+      final midiasDoBackup =
+          (backup['exercicios'] as List).single['midias'] as List;
+      expect(midiasDoBackup.map((midia) => midia['tipo']), ['link']);
+
+      await restaurar(backup, await corridas.exportarDadosDoUsuario());
+      final midiasLocais =
+          (await banco.carregarDadosTreino()).exercicios.single['midias']
+              as List;
+      expect(midiasLocais.map((midia) => midia['tipo']), ['link', 'foto']);
+
+      await arquivo.delete();
+      await restaurar(backup, await corridas.exportarDadosDoUsuario());
+      final midiasSemArquivo =
+          (await banco.carregarDadosTreino()).exercicios.single['midias']
+              as List;
+      expect(midiasSemArquivo.map((midia) => midia['tipo']), ['link']);
+    },
+  );
+
   test('versão local alterada impede substituir qualquer banco', () async {
     final dados = await banco.exportarDadosDoUsuario();
     dados['treinos'] = [

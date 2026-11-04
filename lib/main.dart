@@ -20,6 +20,21 @@ import 'exercicios/demonstracao_exercicio.dart';
 import 'exercicios/aviso_atividade_fisica.dart';
 import 'corrida/corrida_banco.dart';
 import 'corrida/corrida_page.dart';
+import 'edicao_app.dart';
+import 'alunos/aluno.dart';
+import 'alunos/alunos_page.dart';
+import 'alunos/ficha_aluno_page.dart';
+import 'alunos/painel_alunos.dart';
+import 'agenda/agenda_page.dart';
+import 'agenda/agendamento.dart';
+import 'agenda/avisos_agenda.dart';
+import 'lembretes/lembretes_treino.dart';
+import 'modo_exercicio.dart';
+import 'textos_legais_personal.dart';
+import 'alunos/resumo_aluno.dart';
+import 'package:image_picker/image_picker.dart';
+import 'midia/midia_exercicio.dart';
+import 'midia/midias_widgets.dart';
 import 'assinatura/assinatura_workholy.dart';
 import 'assinatura/plano_premium_page.dart';
 import 'sincronizacao/sincronizacao_usuario.dart';
@@ -78,12 +93,16 @@ class Treino {
   final int exercicios;
   final WorkFitCiclo? workfitCiclo;
 
+  // Aluno do personal (edição Personal); nulo nos treinos pessoais.
+  final String? alunoId;
+
   Treino({
     String? id,
     required this.nome,
     required this.objetivo,
     this.exercicios = 0,
     this.workfitCiclo,
+    this.alunoId,
   }) : id = id ?? novoId('treino');
 
   Map<String, dynamic> toJson() => {
@@ -92,11 +111,13 @@ class Treino {
     'objetivo': objetivo,
     'exercicios': exercicios,
     if (workfitCiclo != null) 'workfitCiclo': workfitCiclo!.toJson(),
+    if (alunoId != null) 'alunoId': alunoId,
   };
 
   factory Treino.fromJson(Map<String, dynamic> json) {
     return Treino(
       id: json['id'] is String ? json['id'] as String : null,
+      alunoId: json['alunoId'] is String ? json['alunoId'] as String : null,
       nome: json['nome']?.toString() ?? 'Treino sem nome',
       objetivo: json['objetivo']?.toString() ?? '',
       exercicios: (json['exercicios'] as num?)?.toInt() ?? 0,
@@ -116,6 +137,7 @@ class Exercicio {
   final int series;
   final int repeticoes;
   final String? catalogoId;
+  final List<MidiaExercicio> midias;
 
   Exercicio({
     String? id,
@@ -124,6 +146,7 @@ class Exercicio {
     required this.series,
     required this.repeticoes,
     this.catalogoId,
+    this.midias = const [],
   }) : id = id ?? novoId('exercicio');
 
   Map<String, dynamic> toJson() => {
@@ -133,6 +156,7 @@ class Exercicio {
     'series': series,
     'repeticoes': repeticoes,
     if (catalogoId != null) 'catalogoId': catalogoId,
+    if (midias.isNotEmpty) 'midias': midias.map((m) => m.toJson()).toList(),
   };
 
   factory Exercicio.fromJson(Map<String, dynamic> json) {
@@ -143,6 +167,12 @@ class Exercicio {
       series: (json['series'] as num?)?.toInt() ?? 3,
       repeticoes: (json['repeticoes'] as num?)?.toInt() ?? 12,
       catalogoId: json['catalogoId'] as String?,
+      midias: json['midias'] is List
+          ? (json['midias'] as List)
+                .map(MidiaExercicio.fromJson)
+                .whereType<MidiaExercicio>()
+                .toList()
+          : const [],
     );
   }
 }
@@ -160,6 +190,8 @@ class ItemTreino {
   final bool progressaoAtiva;
   final String? workfitUltimaSessaoAjustada;
   final String? workfitCicloRecuperado;
+  final ModoExercicio modo;
+  final int duracaoSegundos;
 
   ItemTreino({
     String? id,
@@ -172,6 +204,8 @@ class ItemTreino {
     this.progressaoAtiva = true,
     this.workfitUltimaSessaoAjustada,
     this.workfitCicloRecuperado,
+    this.modo = ModoExercicio.carga,
+    this.duracaoSegundos = 0,
   }) : id = id ?? novoId('item');
 
   Map<String, dynamic> toJson() => {
@@ -183,6 +217,8 @@ class ItemTreino {
     'cargaKg': cargaKg,
     'descansoSegundos': descansoSegundos,
     'progressaoAtiva': progressaoAtiva,
+    if (modo != ModoExercicio.carga) 'modo': modo.name,
+    if (duracaoSegundos > 0) 'duracaoSegundos': duracaoSegundos,
     if (workfitUltimaSessaoAjustada != null)
       'workfitUltimaSessaoAjustada': workfitUltimaSessaoAjustada,
     if (workfitCicloRecuperado != null)
@@ -199,6 +235,8 @@ class ItemTreino {
       cargaKg: (json['cargaKg'] as num?)?.toDouble() ?? 0,
       descansoSegundos: (json['descansoSegundos'] as num?)?.toInt() ?? 90,
       progressaoAtiva: json['progressaoAtiva'] as bool? ?? true,
+      modo: ModoExercicio.deNome(json['modo']),
+      duracaoSegundos: (json['duracaoSegundos'] as num?)?.toInt() ?? 0,
       workfitUltimaSessaoAjustada:
           json['workfitUltimaSessaoAjustada'] as String?,
       workfitCicloRecuperado: json['workfitCicloRecuperado'] as String?,
@@ -217,6 +255,9 @@ class SerieExecutada {
   final bool concluida;
   final int descansoSegundos;
   final String? catalogoId;
+  final ModoExercicio modo;
+  final int duracaoPlanejadaSegundos;
+  final int duracaoRealizadaSegundos;
 
   const SerieExecutada({
     required this.id,
@@ -229,6 +270,9 @@ class SerieExecutada {
     required this.concluida,
     required this.descansoSegundos,
     this.catalogoId,
+    this.modo = ModoExercicio.carga,
+    this.duracaoPlanejadaSegundos = 0,
+    this.duracaoRealizadaSegundos = 0,
   });
 
   SerieExecutada copiar({
@@ -236,6 +280,7 @@ class SerieExecutada {
     double? cargaKg,
     bool? concluida,
     String? catalogoId,
+    int? duracaoRealizadaSegundos,
   }) {
     return SerieExecutada(
       id: id,
@@ -248,6 +293,10 @@ class SerieExecutada {
       concluida: concluida ?? this.concluida,
       descansoSegundos: descansoSegundos,
       catalogoId: catalogoId ?? this.catalogoId,
+      modo: modo,
+      duracaoPlanejadaSegundos: duracaoPlanejadaSegundos,
+      duracaoRealizadaSegundos:
+          duracaoRealizadaSegundos ?? this.duracaoRealizadaSegundos,
     );
   }
 
@@ -262,6 +311,11 @@ class SerieExecutada {
     'concluida': concluida,
     'descansoSegundos': descansoSegundos,
     if (catalogoId != null) 'catalogoId': catalogoId,
+    if (modo != ModoExercicio.carga) 'modo': modo.name,
+    if (duracaoPlanejadaSegundos > 0)
+      'duracaoPlanejadaSegundos': duracaoPlanejadaSegundos,
+    if (duracaoRealizadaSegundos > 0)
+      'duracaoRealizadaSegundos': duracaoRealizadaSegundos,
   };
 
   factory SerieExecutada.fromJson(Map<String, dynamic> json) {
@@ -278,6 +332,11 @@ class SerieExecutada {
       concluida: json['concluida'] == true,
       descansoSegundos: (json['descansoSegundos'] as num?)?.toInt() ?? 90,
       catalogoId: json['catalogoId'] as String?,
+      modo: ModoExercicio.deNome(json['modo']),
+      duracaoPlanejadaSegundos:
+          (json['duracaoPlanejadaSegundos'] as num?)?.toInt() ?? 0,
+      duracaoRealizadaSegundos:
+          (json['duracaoRealizadaSegundos'] as num?)?.toInt() ?? 0,
     );
   }
 }
@@ -412,7 +471,10 @@ class _DestinoNavegacao {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  // O Personal usa o app Firebase próprio, lido do google-services.json.
+  await (EdicaoApp.personal
+      ? Firebase.initializeApp()
+      : Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform));
 
   FlutterForegroundTask.initCommunicationPort();
 
@@ -540,6 +602,150 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
   int _ultimaLeituraCorridas = 0;
 
   int abaSelecionada = 0;
+  List<Aluno> alunos = [];
+  List<Agendamento> agenda = [];
+
+  Future<void> recarregarAgenda() async {
+    final lista = await AgendaRepositorio.instancia.carregar();
+    if (mounted) setState(() => agenda = lista);
+    await sincronizarAvisosAgenda(pedirPermissao: true);
+  }
+
+  Future<void> sincronizarAvisosAgenda({bool pedirPermissao = false}) async {
+    if (!EdicaoApp.personal) return;
+    final minutos = await LembretesTreino.instancia.lerAvisoAgenda();
+    final avisos = planejarAvisos(
+      agenda: agenda,
+      nomes: {for (final a in alunos) a.id: a.nome},
+      agora: DateTime.now(),
+      antecedenciaMin: minutos,
+    );
+    final erro = await LembretesTreino.instancia.agendarAvisosDaAgenda(
+      avisos,
+      pedirPermissao: pedirPermissao,
+    );
+    if (erro != null && pedirPermissao && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(erro)));
+    }
+  }
+
+  void abrirAgenda() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => AgendaPage(
+          alunos: List<Aluno>.from(alunos),
+          onAlterou: recarregarAgenda,
+        ),
+      ),
+    );
+  }
+  String? alunoSelecionadoId;
+
+  Aluno? get alunoSelecionado {
+    for (final a in alunos) {
+      if (a.id == alunoSelecionadoId) return a;
+    }
+    return null;
+  }
+
+  List<Treino> get treinosVisiveis => EdicaoApp.personal && alunoSelecionadoId != null
+      ? treinos.where((t) => t.alunoId == alunoSelecionadoId).toList()
+      : treinos;
+
+  int contarTreinosDoAluno(String alunoId) =>
+      treinos.where((t) => t.alunoId == alunoId).length;
+
+  Future<void> salvarAluno(Aluno aluno) async {
+    final indice = alunos.indexWhere((a) => a.id == aluno.id);
+    final atualizados = List<Aluno>.from(alunos);
+    if (indice >= 0) {
+      atualizados[indice] = aluno;
+    } else {
+      atualizados.add(aluno);
+    }
+    await AlunosRepositorio.instancia.salvar(atualizados);
+    if (mounted) setState(() => alunos = atualizados);
+  }
+
+  Future<void> excluirAluno(Aluno aluno) async {
+    final atualizados = alunos.where((a) => a.id != aluno.id).toList();
+    final treinosAtualizados = [
+      for (final t in treinos)
+        t.alunoId == aluno.id
+            ? Treino(
+                id: t.id,
+                nome: t.nome,
+                objetivo: t.objetivo,
+                exercicios: t.exercicios,
+                workfitCiclo: t.workfitCiclo,
+              )
+            : t,
+    ];
+    await WorkHolyBanco.instancia.salvarDadosTreino(
+      treinos: treinosAtualizados.map((t) => t.toJson()).toList(),
+      exercicios: exercicios.map((e) => e.toJson()).toList(),
+      itensTreino: itensTreino.map((i) => i.toJson()).toList(),
+      sessoesTreino: sessoesTreino.map((s) => s.toJson()).toList(),
+    );
+    await AlunosRepositorio.instancia.salvar(atualizados);
+    if (!mounted) return;
+    setState(() {
+      alunos = atualizados;
+      treinos = treinosAtualizados;
+      if (alunoSelecionadoId == aluno.id) alunoSelecionadoId = null;
+    });
+  }
+
+  void abrirFichaAluno(Aluno aluno) {
+    final treinosAluno = treinos.where((t) => t.alunoId == aluno.id).toList();
+    final idsTreinos = treinosAluno.map((t) => t.id).toSet();
+    final sessoesAluno = <SessaoAluno>[
+      for (final s in sessoesTreino)
+        if (s.finalizada && idsTreinos.contains(s.treinoId))
+          SessaoAluno(
+            nomeTreino: s.nomeTreino,
+            inicio: s.inicio,
+            fim: s.fim!,
+            seriesConcluidas: s.seriesConcluidas,
+            volumeKg: s.series
+                .where((x) => x.concluida)
+                .fold<double>(0, (t, x) => t + x.repeticoesRealizadas * x.cargaKg),
+            cargaMaxima: {
+              for (final x in s.series.where((x) => x.concluida))
+                x.nomeExercicio: s.series
+                    .where((y) => y.concluida && y.nomeExercicio == x.nomeExercicio)
+                    .map((y) => y.cargaKg)
+                    .reduce((a, b) => a > b ? a : b),
+            },
+          ),
+    ];
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (ctx) => FichaAlunoPage(
+          aluno: aluno,
+          treinos: [
+            for (final t in treinosAluno)
+              TreinoDoAluno(
+                t.id,
+                t.nome,
+                t.objetivo,
+                quantidadeExercicios(t.id),
+              ),
+          ],
+          sessoes: sessoesAluno,
+          onAbrirTreino: (id) {
+            Navigator.of(ctx).pop();
+            abrirDetalhesTreino(id);
+          },
+          onNovoTreino: () {
+            Navigator.of(ctx).pop();
+            setState(() => alunoSelecionadoId = aluno.id);
+            criarOuEditarTreino();
+          },
+        ),
+      ),
+    );
+  }
   bool carregando = true;
 
   List<Treino> treinos = [];
@@ -608,6 +814,7 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
   }
 
   Future<void> carregarCorridasDoPainel() async {
+    if (!EdicaoApp.corridaHabilitada) return;
     final leitura = ++_ultimaLeituraCorridas;
 
     try {
@@ -650,7 +857,7 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
       }
 
       // 2. Dados pessoais, exigidos também de contas antigas incompletas.
-      if (!await _perfilPraticanteCompleto()) {
+      if (EdicaoApp.workfitHabilitado && !await _perfilPraticanteCompleto()) {
         if (!mounted) return;
         final salvou = await _abrirEtapaObrigatoria(
           (_) => DadosPessoaisOnboardingPage(nomeInicial: _nomeCliente),
@@ -660,7 +867,7 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
       }
 
       // 3. Primeiro treino, criado pelo WorkFit ou manualmente.
-      while (mounted && treinos.isEmpty) {
+      while (EdicaoApp.workfitHabilitado && mounted && treinos.isEmpty) {
         await _executarEtapaTreinoObrigatoria();
       }
       if (!mounted) return;
@@ -898,7 +1105,7 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
   Future<void> verificarWorkFitPrimeiroAcesso({
     bool abrirNovamente = false,
   }) async {
-    if (!mounted) return;
+    if (!mounted || !EdicaoApp.workfitHabilitado) return;
 
     try {
       final banco = WorkHolyBanco.instancia;
@@ -966,7 +1173,17 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
     // Converte sugestões para modelos do app
     final dados = WorkFitAdapter.converterSugestoes(sugestoes);
 
-    final novosTreinos = dados['treinos']!.map(Treino.fromJson).toList();
+    final novosTreinos = dados['treinos']!.map(Treino.fromJson).map((t) {
+      if (!EdicaoApp.personal || alunoSelecionadoId == null) return t;
+      return Treino(
+        id: t.id,
+        nome: t.nome,
+        objetivo: t.objetivo,
+        exercicios: t.exercicios,
+        workfitCiclo: t.workfitCiclo,
+        alunoId: alunoSelecionadoId,
+      );
+    }).toList();
     final novosExercicios = dados['exercicios']!
         .map(Exercicio.fromJson)
         .toList();
@@ -1051,7 +1268,11 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
             !idsExercicios.contains(item.exercicioId),
       );
       await _carregarRemocoesWorkFit();
-      unawaited(carregarCorridasDoPainel());
+      if (EdicaoApp.personal) {
+        alunos = await AlunosRepositorio.instancia.carregar();
+        agenda = await AgendaRepositorio.instancia.carregar();
+        unawaited(sincronizarAvisosAgenda());
+      }      unawaited(carregarCorridasDoPainel());
     } on TrocaDeContaBloqueada {
       if (mounted) setState(() => _contaBloqueada = true);
     } catch (erro, stackTrace) {
@@ -1084,7 +1305,7 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
     }
   }
 
-  Future<void> salvarDados() async {
+  Future<bool> salvarDados() async {
     try {
       await WorkHolyBanco.instancia.salvarDadosTreino(
         treinos: treinos.map((treino) => treino.toJson()).toList(),
@@ -1093,6 +1314,7 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
         sessoesTreino: sessoesTreino.map((sessao) => sessao.toJson()).toList(),
       );
       SincronizacaoUsuario.instancia.agendarEnvio();
+      return true;
     } catch (erro) {
       debugPrint('Erro ao salvar dados do WorkHoly: $erro');
 
@@ -1101,6 +1323,7 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
           const SnackBar(content: Text('Erro ao salvar os dados no aparelho.')),
         );
       }
+      return false;
     }
   }
 
@@ -1202,6 +1425,9 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
             descansoSegundos: item.descansoSegundos,
             concluida: false,
             catalogoId: indice >= 0 ? exercicios[indice].catalogoId : null,
+            modo: item.modo,
+            duracaoPlanejadaSegundos: item.duracaoSegundos,
+            duracaoRealizadaSegundos: item.duracaoSegundos,
           ),
         );
       }
@@ -1381,6 +1607,7 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
         objetivo: antigo.objetivo,
         exercicios: novosItens.length,
         workfitCiclo: antigo.workfitCiclo,
+        alunoId: antigo.alunoId,
       );
     }
     final itensAtualizados = [
@@ -1402,7 +1629,11 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
   Future<void> criarOuEditarTreino([Treino? existente]) async {
     final resultado = await showDialog<Treino>(
       context: context,
-      builder: (_) => FormularioTreinoDialog(existente: existente),
+      builder: (_) => FormularioTreinoDialog(
+        existente: existente,
+        alunoIdNovo: EdicaoApp.personal ? alunoSelecionadoId : null,
+        alunos: EdicaoApp.personal ? alunos : null,
+      ),
     );
 
     if (resultado == null || !mounted) return;
@@ -1471,6 +1702,12 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
 
     if (resultado == null || !mounted) return;
 
+    final midiasRemovidas = existente?.midias
+            .where(
+              (midia) => !resultado.midias.any((nova) => nova.id == midia.id),
+            )
+            .toList() ??
+        const <MidiaExercicio>[];
     setState(() {
       if (existente == null) {
         exercicios.add(resultado);
@@ -1483,7 +1720,25 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
       }
     });
 
-    await salvarDados();
+    final salvou = await salvarDados();
+    if (!salvou) return;
+    for (final midia in midiasRemovidas) {
+      try {
+        await ArmazenamentoMidia.apagar(midia);
+      } catch (erro, stackTrace) {
+        debugPrint('Erro ao remover mídia local do exercício: $erro');
+        debugPrintStack(stackTrace: stackTrace);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Exercício salvo, mas uma mídia removida não pôde ser apagada deste aparelho.',
+              ),
+            ),
+          );
+        }
+      }
+    }
   }
 
   Future<void> excluirExercicio(Exercicio exercicio) async {
@@ -1524,6 +1779,9 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
 
     if (confirmar != true || !mounted) return;
 
+    final exerciciosRemovidos = exercicios
+        .where((exercicio) => idsValidos.contains(exercicio.id))
+        .toList();
     final exerciciosRestantes = exercicios
         .where((exercicio) => !idsValidos.contains(exercicio.id))
         .toList();
@@ -1556,14 +1814,27 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
     setState(() {
       exercicios = exerciciosRestantes;
       itensTreino = itensRestantes;
-      _idsExerciciosSelecionados.removeAll(idsValidos);
     });
+    var falhaAoApagarMidia = false;
+    for (final exercicio in exerciciosRemovidos) {
+      for (final midia in exercicio.midias) {
+        try {
+          await ArmazenamentoMidia.apagar(midia);
+        } catch (erro, stackTrace) {
+          falhaAoApagarMidia = true;
+          debugPrint('Erro ao remover mídia local do exercício: $erro');
+          debugPrintStack(stackTrace: stackTrace);
+        }
+      }
+    }
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            quantidade == 1
+            falhaAoApagarMidia
+                ? 'Exercício removido, mas não foi possível apagar uma mídia deste aparelho.'
+                : quantidade == 1
                 ? 'Exercício excluído com sucesso.'
                 : '$quantidade exercícios excluídos com sucesso.',
           ),
@@ -1645,28 +1916,35 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
   }
 
   Widget construirBarraDeNavegacao() {
-    const destinos = [
-      _DestinoNavegacao(
+    final destinos = [
+      const _DestinoNavegacao(
         rotulo: 'Painel',
         icone: Icons.dashboard_outlined,
         iconeSelecionado: Icons.dashboard,
       ),
-      _DestinoNavegacao(
+      if (EdicaoApp.personal)
+        const _DestinoNavegacao(
+          rotulo: 'Alunos',
+          icone: Icons.groups_outlined,
+          iconeSelecionado: Icons.groups,
+        ),
+      const _DestinoNavegacao(
         rotulo: 'Treinos',
         icone: Icons.view_list_outlined,
         iconeSelecionado: Icons.view_list,
       ),
-      _DestinoNavegacao(
+      const _DestinoNavegacao(
         rotulo: 'Exercícios',
         icone: Icons.fitness_center_outlined,
         iconeSelecionado: Icons.fitness_center,
       ),
-      _DestinoNavegacao(
-        rotulo: 'Corrida',
-        icone: Icons.directions_run_outlined,
-        iconeSelecionado: Icons.directions_run,
-      ),
-      _DestinoNavegacao(
+      if (EdicaoApp.corridaHabilitada)
+        const _DestinoNavegacao(
+          rotulo: 'Corrida',
+          icone: Icons.directions_run_outlined,
+          iconeSelecionado: Icons.directions_run,
+        ),
+      const _DestinoNavegacao(
         rotulo: 'Histórico',
         icone: Icons.history_outlined,
         iconeSelecionado: Icons.history,
@@ -1769,18 +2047,27 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
     }
     final paginas = [
       construirPainel(),
+      if (EdicaoApp.personal)
+        AlunosPage(
+          alunos: alunos,
+          contarTreinos: contarTreinosDoAluno,
+          onAbrirTreinos: abrirFichaAluno,
+          onSalvar: salvarAluno,
+          onExcluir: excluirAluno,
+        ),
       construirPaginaTreinos(),
       construirPaginaExercicios(),
-      CorridaPage(
-        onHistoricoAtualizado: carregarCorridasDoPainel,
-        ciclosWorkFit: {
-          for (final ciclo
-              in treinos
-                  .map((treino) => treino.workfitCiclo)
-                  .whereType<WorkFitCiclo>())
-            ciclo.id: ciclo,
-        }.values.toList(),
-      ),
+      if (EdicaoApp.corridaHabilitada)
+        CorridaPage(
+          onHistoricoAtualizado: carregarCorridasDoPainel,
+          ciclosWorkFit: {
+            for (final ciclo
+                in treinos
+                    .map((treino) => treino.workfitCiclo)
+                    .whereType<WorkFitCiclo>())
+              ciclo.id: ciclo,
+          }.values.toList(),
+        ),
       construirPaginaHistorico(),
     ];
 
@@ -1809,6 +2096,12 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
           ],
         ),
         actions: [
+          if (EdicaoApp.personal)
+            IconButton(
+              tooltip: 'Agenda dos alunos',
+              icon: const Icon(Icons.event_note_outlined),
+              onPressed: abrirAgenda,
+            ),
           IconButton(
             tooltip: 'Configurações',
             icon: const Icon(Icons.settings_outlined),
@@ -1933,7 +2226,201 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
     );
   }
 
+  Widget construirPainelPersonal() {
+    final alunoPorTreino = {for (final t in treinos) t.id: t.alunoId};
+    final sessoes = [
+      for (final s in sessoesTreino)
+        if (s.finalizada)
+          SessaoPainelAluno(
+            alunoId: alunoPorTreino[s.treinoId],
+            nomeTreino: s.nomeTreino,
+            inicio: s.inicio,
+            seriesConcluidas: s.seriesConcluidas,
+          ),
+    ];
+    final resumos = resumirPainelPorAluno(
+      alunos.map((a) => a.id).toList(),
+      sessoes,
+      DateTime.now(),
+    );
+    String nomeDe(ResumoPainelAluno r) {
+      for (final a in alunos) {
+        if (a.id == r.alunoId) return a.nome;
+      }
+      return 'Sem aluno';
+    }
+
+    String data(DateTime d) =>
+        '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}';
+    String hora(DateTime d) =>
+        '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+
+    final comAtividadeHoje = resumos.where((r) => r.hoje.isNotEmpty).toList();
+    final agendaHoje = agendamentosDoDia(agenda, DateTime.now());
+
+    return ListView(
+      padding: const EdgeInsets.all(18),
+      children: [
+        Text(
+          _saudacao,
+          style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Acompanhe seus alunos e treinos.',
+          style: TextStyle(color: painelTextoSuave),
+        ),
+        const SizedBox(height: 20),
+        const SizedBox(height: 16),
+        CartaoPainel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TituloSecaoPainel(
+                'Agenda de hoje',
+                icone: Icons.event_note_outlined,
+                trailing: TextButton(
+                  onPressed: abrirAgenda,
+                  child: const Text('Abrir agenda'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (agendaHoje.isEmpty)
+                const Text(
+                  'Nenhum horário marcado para hoje.',
+                  style: TextStyle(color: textoSecundario),
+                ),
+              for (final a in agendaHoje)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    '${formatarHora(a.inicio)} • '
+                    '${alunos.where((x) => x.id == a.alunoId).map((x) => x.nome).firstOrNull ?? 'Aluno removido'}'
+                    '${a.local.isEmpty ? '' : ' • ${a.local}'}',
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        CartaoPainel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const TituloSecaoPainel(
+                'Resumo por aluno',
+                icone: Icons.groups_outlined,
+              ),
+              const SizedBox(height: 12),
+              if (resumos.isEmpty)
+                const Text(
+                  'Cadastre alunos na aba Alunos para acompanhar aqui.',
+                  style: TextStyle(color: textoSecundario),
+                ),
+              for (final r in resumos)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              nomeDe(r),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            Text(
+                              r.ultima == null
+                                  ? 'Nenhum treino concluído'
+                                  : 'Último treino: ${data(r.ultima!)}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: textoSecundario,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            '${r.concluidos} concluídos',
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          Text(
+                            '${r.naSemana} na semana',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: textoSecundario,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        CartaoPainel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const TituloSecaoPainel(
+                'Atividades de hoje',
+                icone: Icons.today_outlined,
+              ),
+              const SizedBox(height: 12),
+              if (comAtividadeHoje.isEmpty)
+                const Text(
+                  'Nenhum aluno concluiu treino hoje.',
+                  style: TextStyle(color: textoSecundario),
+                ),
+              for (final r in comAtividadeHoje) ...[
+                Text(
+                  nomeDe(r),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                for (final s in r.hoje)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      '${hora(s.inicio)} • ${s.nomeTreino} • '
+                      '${s.seriesConcluidas} séries',
+                      style: const TextStyle(color: textoSecundario),
+                    ),
+                  ),
+                const SizedBox(height: 10),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+        tituloSecao('Meus treinos'),
+        const SizedBox(height: 10),
+        if (treinos.isEmpty)
+          const Text(
+            'Nenhum treino cadastrado. Crie o primeiro treino.',
+            style: TextStyle(color: textoSecundario),
+          ),
+        ...treinos.map((treino) => cartaoTreino(treino)),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: () => criarOuEditarTreino(),
+          icon: const Icon(Icons.add),
+          label: const Text('Criar treino'),
+        ),
+      ],
+    );
+  }
+
   Widget construirPainel() {
+    if (EdicaoApp.personal) return construirPainelPersonal();
     final agora = DateTime.now();
     final sessoesFinalizadas =
         sessoesTreino.where((sessao) => sessao.finalizada).toList()
@@ -2066,9 +2553,9 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
         ),
         const SizedBox(height: 20),
 
-        _cartaoTreinoDoDia(),
+        if (EdicaoApp.workfitHabilitado) _cartaoTreinoDoDia(),
 
-        const CartaoPassos(),
+        if (EdicaoApp.workfitHabilitado) const CartaoPassos(),
 
         CartaoPainel(
           child: Column(
@@ -2105,23 +2592,26 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
                     detalhe: 'séries',
                     rotulo: 'Séries',
                   ),
-                  AnelProgressoPainel(
-                    progresso: _progressoContraAnterior(
-                      kmSemana,
-                      kmSemanaAnterior,
+                  if (EdicaoApp.corridaHabilitada)
+                    AnelProgressoPainel(
+                      progresso: _progressoContraAnterior(
+                        kmSemana,
+                        kmSemanaAnterior,
+                      ),
+                      cor: painelRoxo,
+                      icone: Icons.directions_run,
+                      valor: kmSemana.toStringAsFixed(1).replaceAll('.', ','),
+                      detalhe: 'km',
+                      rotulo: 'Corrida',
                     ),
-                    cor: painelRoxo,
-                    icone: Icons.directions_run,
-                    valor: kmSemana.toStringAsFixed(1).replaceAll('.', ','),
-                    detalhe: 'km',
-                    rotulo: 'Corrida',
-                  ),
                 ],
               ),
               const SizedBox(height: 10),
-              const Text(
-                'Séries e corrida: progresso em relação à semana anterior.',
-                style: TextStyle(fontSize: 11, color: painelTextoSuave),
+              Text(
+                EdicaoApp.corridaHabilitada
+                    ? 'Séries e corrida: progresso em relação à semana anterior.'
+                    : 'Séries: progresso em relação à semana anterior.',
+                style: const TextStyle(fontSize: 11, color: painelTextoSuave),
               ),
             ],
           ),
@@ -2396,6 +2886,18 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
                       style: const TextStyle(color: textoSecundario),
                     ),
                     const SizedBox(height: 3),
+                    if (EdicaoApp.personal)
+                      Text(
+                        alunos
+                                .where((a) => a.id == treino.alunoId)
+                                .map((a) => 'Aluno: ${a.nome}')
+                                .firstOrNull ??
+                            'Sem aluno vinculado',
+                        style: const TextStyle(
+                          color: painelTextoSuave,
+                          fontSize: 12,
+                        ),
+                      ),
                     Text(
                       '$quantidade ${quantidade == 1 ? 'exercício associado' : 'exercícios associados'}',
                       style: const TextStyle(color: painelLima, fontSize: 12),
@@ -2452,22 +2954,45 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
         ),
         const SizedBox(height: 4),
         Text(
-          '${treinos.length} ${treinos.length == 1 ? 'treino cadastrado' : 'treinos cadastrados'}',
+          '${treinosVisiveis.length} ${treinosVisiveis.length == 1 ? 'treino cadastrado' : 'treinos cadastrados'}',
           style: const TextStyle(color: painelTextoSuave),
         ),
-        const SizedBox(height: 14),
-        FilledButton.icon(
-          onPressed: () => verificarWorkFitPrimeiroAcesso(abrirNovamente: true),
-          icon: const Icon(Icons.auto_awesome),
-          label: const Text('Criar plano com WorkFit'),
-          style: FilledButton.styleFrom(
-            backgroundColor: painelRoxo,
-            foregroundColor: Colors.white,
+        if (EdicaoApp.personal) ...[
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String?>(
+            initialValue: alunoSelecionado?.id,
+            decoration: const InputDecoration(labelText: 'Aluno'),
+            items: [
+              const DropdownMenuItem<String?>(
+                value: null,
+                child: Text('Todos os treinos'),
+              ),
+              ...alunos.map(
+                (a) => DropdownMenuItem<String?>(
+                  value: a.id,
+                  child: Text(a.nome),
+                ),
+              ),
+            ],
+            onChanged: (id) => setState(() => alunoSelecionadoId = id),
           ),
-        ),
-        const SizedBox(height: 16),
-        _cartaoAprendizadoWorkFit(),
-        if (treinos.isEmpty)
+        ],
+        const SizedBox(height: 14),
+        if (EdicaoApp.workfitHabilitado) ...[
+          FilledButton.icon(
+            onPressed: () =>
+                verificarWorkFitPrimeiroAcesso(abrirNovamente: true),
+            icon: const Icon(Icons.auto_awesome),
+            label: const Text('Criar plano com WorkFit'),
+            style: FilledButton.styleFrom(
+              backgroundColor: painelRoxo,
+              foregroundColor: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _cartaoAprendizadoWorkFit(),
+        ],
+        if (treinosVisiveis.isEmpty)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 30),
             child: Text(
@@ -2476,7 +3001,7 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
               style: TextStyle(color: textoSecundario),
             ),
           ),
-        ...treinos.map((treino) => cartaoTreino(treino)),
+        ...treinosVisiveis.map((treino) => cartaoTreino(treino)),
       ],
     );
   }
@@ -3057,60 +3582,63 @@ class ConfiguracoesPage extends StatelessWidget {
                     );
                   },
                 ),
-                const Divider(height: 1, indent: 16, endIndent: 16),
-                ListTile(
-                  leading: const Icon(
-                    Icons.emoji_events_outlined,
-                    color: verde,
-                  ),
-                  title: const Text('Recordes pessoais'),
-                  subtitle: const Text('Acompanhe suas melhores marcas'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => RecordesPessoaisPage(
-                          exercicios: exercicios
-                              .map(
-                                (e) => RecordeExercicio(id: e.id, nome: e.nome),
-                              )
-                              .toList(),
+                if (!EdicaoApp.personal) ...[
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+                  ListTile(
+                    leading: const Icon(
+                      Icons.emoji_events_outlined,
+                      color: verde,
+                    ),
+                    title: const Text('Recordes pessoais'),
+                    subtitle: const Text('Acompanhe suas melhores marcas'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => RecordesPessoaisPage(
+                            exercicios: exercicios
+                                .map(
+                                  (e) =>
+                                      RecordeExercicio(id: e.id, nome: e.nome),
+                                )
+                                .toList(),
+                          ),
                         ),
-                      ),
-                    );
-                  },
-                ),
-                const Divider(height: 1, indent: 16, endIndent: 16),
-                ListTile(
-                  leading: const Icon(Icons.timer_outlined, color: verde),
-                  title: const Text('Preferências de treino'),
-                  subtitle: const Text('Opções de execução e descanso'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => const PreferenciasTreinoPage(),
-                      ),
-                    );
-                  },
-                ),
-                const Divider(height: 1, indent: 16, endIndent: 16),
-                ListTile(
-                  leading: const Icon(
-                    Icons.notifications_outlined,
-                    color: verde,
+                      );
+                    },
                   ),
-                  title: const Text('Lembretes e voz'),
-                  subtitle: const Text('Avisos de treino e voz do treinador'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => const LembretesPage(),
-                      ),
-                    );
-                  },
-                ),
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+                  ListTile(
+                    leading: const Icon(Icons.timer_outlined, color: verde),
+                    title: const Text('Preferências de treino'),
+                    subtitle: const Text('Opções de execução e descanso'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const PreferenciasTreinoPage(),
+                        ),
+                      );
+                    },
+                  ),
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+                  ListTile(
+                    leading: const Icon(
+                      Icons.notifications_outlined,
+                      color: verde,
+                    ),
+                    title: const Text('Lembretes e voz'),
+                    subtitle: const Text('Avisos de treino e voz do treinador'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const LembretesPage(),
+                        ),
+                      );
+                    },
+                  ),
+                ],
               ],
             ),
           ),
@@ -3247,14 +3775,16 @@ pelo responsável pelo aplicativo antes da distribuição pública.
           ),
           const SizedBox(height: 16),
           Text(
-            'WorkHoly Mobile',
+            EdicaoApp.personal ? 'Work Holy Personal' : 'WorkHoly Mobile',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.headlineSmall
                 ?.copyWith(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
-          const Text(
-            'Treinamento, organização e evolução.',
+          Text(
+            EdicaoApp.personal
+                ? 'Controle alunos, treinos, tudo nas palmas de suas mãos.'
+                : 'Treinamento, organização e evolução.',
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 28),
@@ -3310,8 +3840,13 @@ pelo responsável pelo aplicativo antes da distribuição pública.
                     'Regras de utilização e propriedade intelectual',
                   ),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: () =>
-                      abrirDocumento(context, 'Termos de uso', termosDeUso),
+                  onTap: () => abrirDocumento(
+                    context,
+                    'Termos de uso',
+                    EdicaoApp.personal
+                        ? TextosLegaisPersonal.termosDeUso
+                        : termosDeUso,
+                  ),
                 ),
                 const Divider(height: 1),
                 ListTile(
@@ -3322,7 +3857,9 @@ pelo responsável pelo aplicativo antes da distribuição pública.
                   onTap: () => abrirDocumento(
                     context,
                     'Política de privacidade',
-                    politicaPrivacidade,
+                    EdicaoApp.personal
+                        ? TextosLegaisPersonal.politicaPrivacidade
+                        : politicaPrivacidade,
                   ),
                 ),
               ],
@@ -3371,7 +3908,18 @@ class DocumentoLegalPage extends StatelessWidget {
 class FormularioTreinoDialog extends StatefulWidget {
   final Treino? existente;
 
-  const FormularioTreinoDialog({super.key, this.existente});
+  // Aluno que receberá o treino ao criar um novo.
+  final String? alunoIdNovo;
+
+  // Quando informada (edição Personal), o formulário permite escolher o aluno.
+  final List<Aluno>? alunos;
+
+  const FormularioTreinoDialog({
+    super.key,
+    this.existente,
+    this.alunoIdNovo,
+    this.alunos,
+  });
 
   @override
   State<FormularioTreinoDialog> createState() => _FormularioTreinoDialogState();
@@ -3380,10 +3928,14 @@ class FormularioTreinoDialog extends StatefulWidget {
 class _FormularioTreinoDialogState extends State<FormularioTreinoDialog> {
   late final TextEditingController nomeController;
   late final TextEditingController objetivoController;
+  String? _alunoId;
 
   @override
   void initState() {
     super.initState();
+    _alunoId = widget.existente == null
+        ? widget.alunoIdNovo
+        : widget.existente!.alunoId;
     nomeController = TextEditingController(text: widget.existente?.nome ?? '');
     objetivoController = TextEditingController(
       text: widget.existente?.objetivo ?? '',
@@ -3417,6 +3969,9 @@ class _FormularioTreinoDialogState extends State<FormularioTreinoDialog> {
         objetivo: objetivo,
         exercicios: existente?.exercicios ?? 0,
         workfitCiclo: existente?.workfitCiclo,
+        alunoId: widget.alunos == null
+            ? (existente?.alunoId ?? widget.alunoIdNovo)
+            : _alunoId,
       ),
     );
   }
@@ -3449,6 +4004,28 @@ class _FormularioTreinoDialogState extends State<FormularioTreinoDialog> {
                 hintText: 'Ex.: Peito e tríceps',
               ),
             ),
+            if (widget.alunos != null) ...[
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String?>(
+                initialValue: widget.alunos!.any((a) => a.id == _alunoId)
+                    ? _alunoId
+                    : null,
+                decoration: const InputDecoration(labelText: 'Aluno'),
+                items: [
+                  const DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('Sem aluno'),
+                  ),
+                  ...widget.alunos!.map(
+                    (a) => DropdownMenuItem<String?>(
+                      value: a.id,
+                      child: Text(a.nome),
+                    ),
+                  ),
+                ],
+                onChanged: (id) => setState(() => _alunoId = id),
+              ),
+            ],
           ],
         ),
       ),
@@ -3476,12 +4053,18 @@ class FormularioExercicioDialog extends StatefulWidget {
 class _FormularioExercicioDialogState extends State<FormularioExercicioDialog> {
   late final TextEditingController nomeController;
   late final TextEditingController grupoController;
+  late List<MidiaExercicio> _midias;
+  final List<MidiaExercicio> _adicionadas = [];
+  final ImagePicker _picker = ImagePicker();
+  bool _confirmado = false;
+  bool _anexando = false;
 
   @override
   void initState() {
     super.initState();
 
     final exercicio = widget.existente;
+    _midias = List.of(exercicio?.midias ?? const []);
 
     nomeController = TextEditingController(text: exercicio?.nome ?? '');
     grupoController = TextEditingController(text: exercicio?.grupo ?? '');
@@ -3489,12 +4072,102 @@ class _FormularioExercicioDialogState extends State<FormularioExercicioDialog> {
 
   @override
   void dispose() {
+    // Cancelar o formulário descarta os arquivos copiados nesta sessão.
+    if (!_confirmado) {
+      for (final m in _adicionadas) {
+        ArmazenamentoMidia.apagar(m);
+      }
+    }
     nomeController.dispose();
     grupoController.dispose();
     super.dispose();
   }
 
+  Future<void> _anexarArquivo(TipoMidia tipo, ImageSource fonte) async {
+    if (_anexando) return;
+    setState(() => _anexando = true);
+    try {
+      final escolhido = tipo == TipoMidia.foto
+          ? await _picker.pickImage(
+              source: fonte,
+              maxWidth: 1600,
+              imageQuality: 85,
+            )
+          : await _picker.pickVideo(
+              source: fonte,
+              maxDuration: const Duration(minutes: 2),
+            );
+      if (escolhido == null) return;
+      final destino = await ArmazenamentoMidia.copiar(
+        escolhido.path,
+        prefixo: tipo.name,
+      );
+      final midia = MidiaExercicio(tipo: tipo, destino: destino);
+      _adicionadas.add(midia);
+      if (mounted) setState(() => _midias.add(midia));
+    } catch (erro) {
+      debugPrint('Erro ao anexar mídia: $erro');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Não foi possível anexar o arquivo. Tente de novo.'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _anexando = false);
+    }
+  }
+
+  Future<void> _anexarLink() async {
+    final controller = TextEditingController();
+    final texto = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Link do vídeo'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.url,
+          decoration: const InputDecoration(
+            hintText: 'youtube.com/... ou vimeo.com/...',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text),
+            child: const Text('Adicionar'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (texto == null || !mounted) return;
+    final uri = validarLinkMidia(texto);
+    if (uri == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Informe um link http ou https válido.')),
+      );
+      return;
+    }
+    final midia = MidiaExercicio(tipo: TipoMidia.link, destino: uri.toString());
+    setState(() => _midias.add(midia));
+  }
+
+  void _removerMidia(MidiaExercicio midia) {
+    setState(() => _midias.removeWhere((m) => m.id == midia.id));
+    if (_adicionadas.any((m) => m.id == midia.id)) {
+      _adicionadas.removeWhere((m) => m.id == midia.id);
+      ArmazenamentoMidia.apagar(midia);
+    }
+  }
+
   void salvar() {
+    if (_anexando) return;
     final nome = nomeController.text.trim();
     final grupo = grupoController.text.trim();
     if (nome.isEmpty || grupo.isEmpty) {
@@ -3504,15 +4177,17 @@ class _FormularioExercicioDialogState extends State<FormularioExercicioDialog> {
       return;
     }
 
+    _confirmado = true;
     Navigator.of(context).pop(
-      Exercicio(
-        id: widget.existente?.id,
-        nome: nome,
-        grupo: grupo,
-        series: widget.existente?.series ?? 3,
-        repeticoes: widget.existente?.repeticoes ?? 12,
-        catalogoId: widget.existente?.catalogoId,
-      ),
+    Exercicio(
+      id: widget.existente?.id,
+      nome: nome,
+      grupo: grupo,
+      series: widget.existente?.series ?? 3,
+      repeticoes: widget.existente?.repeticoes ?? 12,
+      catalogoId: widget.existente?.catalogoId,
+      midias: _midias,
+    ),
     );
   }
 
@@ -3541,6 +4216,70 @@ class _FormularioExercicioDialogState extends State<FormularioExercicioDialog> {
                 hintText: 'Ex.: Peito, Costas, Pernas',
               ),
             ),
+            if (EdicaoApp.midiaHabilitada) ...[
+              const SizedBox(height: 16),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Fotos e vídeos',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Salvos apenas neste aparelho; não entram no backup.',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+              MidiasDoExercicio(midias: _midias, onRemover: _removerMidia),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                children: [
+                  ActionChip(
+                    avatar: const Icon(Icons.photo_library_outlined, size: 18),
+                    label: const Text('Foto'),
+                    onPressed: _anexando
+                        ? null
+                        : () => _anexarArquivo(
+                            TipoMidia.foto,
+                            ImageSource.gallery,
+                          ),
+                  ),
+                  ActionChip(
+                    avatar: const Icon(Icons.photo_camera_outlined, size: 18),
+                    label: const Text('Câmera'),
+                    onPressed: _anexando
+                        ? null
+                        : () => _anexarArquivo(
+                            TipoMidia.foto,
+                            ImageSource.camera,
+                          ),
+                  ),
+                  ActionChip(
+                    avatar: const Icon(Icons.video_library_outlined, size: 18),
+                    label: const Text('Vídeo'),
+                    onPressed: _anexando
+                        ? null
+                        : () => _anexarArquivo(
+                            TipoMidia.video,
+                            ImageSource.gallery,
+                          ),
+                  ),
+                  ActionChip(
+                    avatar: const Icon(Icons.link, size: 18),
+                    label: const Text('Link'),
+                    onPressed: _anexando ? null : _anexarLink,
+                  ),
+                ],
+              ),
+              if (_anexando)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: LinearProgressIndicator(),
+                ),
+            ],
           ],
         ),
       ),
@@ -3549,7 +4288,10 @@ class _FormularioExercicioDialogState extends State<FormularioExercicioDialog> {
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancelar'),
         ),
-        ElevatedButton(onPressed: salvar, child: const Text('Salvar')),
+        ElevatedButton(
+          onPressed: _anexando ? null : salvar,
+          child: const Text('Salvar'),
+        ),
       ],
     );
   }
@@ -3744,7 +4486,8 @@ class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
     final alteracoes = <String, AjusteWorkFit>{};
     final leituras = <String, LeituraWorkFit>{};
     for (final item in itens) {
-      if (item.workfitUltimaSessaoAjustada == ultima.id ||
+      if (item.modo != ModoExercicio.carga ||
+          item.workfitUltimaSessaoAjustada == ultima.id ||
           (cicloEncerrado && item.workfitCicloRecuperado == ciclo?.id) ||
           itens
                   .where((outro) => outro.exercicioId == item.exercicioId)
@@ -4285,11 +5028,13 @@ class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
                                         ],
                                         const SizedBox(height: 10),
                                         Text(
-                                          '${item.series} séries × ${item.repeticoes} repetições',
+                                          item.modo == ModoExercicio.tempo
+                                              ? '${item.series} séries × ${formatarDuracaoCurta(item.duracaoSegundos)}'
+                                              : '${item.series} séries × ${item.repeticoes} repetições',
                                         ),
                                         const SizedBox(height: 4),
                                         Text(
-                                          '${formatarCarga(item.cargaKg)} • Descanso: ${formatarDescanso(item.descansoSegundos)}',
+                                          '${item.modo == ModoExercicio.carga ? '${formatarCarga(item.cargaKg)} • ' : ''}Descanso: ${formatarDescanso(item.descansoSegundos)}',
                                           style: const TextStyle(
                                             color: textoSecundario,
                                             fontSize: 12,
@@ -4363,7 +5108,9 @@ class _ConfiguracaoExercicioDialogState
   late final TextEditingController repeticoesController;
   late final TextEditingController cargaController;
   late final TextEditingController descansoController;
+  late final TextEditingController duracaoController;
   late bool progressaoAtiva;
+  late ModoExercicio modo;
 
   String? erroValidacao;
 
@@ -4373,7 +5120,11 @@ class _ConfiguracaoExercicioDialogState
 
     final item = widget.item;
     progressaoAtiva = item.progressaoAtiva;
+    modo = item.modo;
 
+    duracaoController = TextEditingController(
+      text: '${item.duracaoSegundos > 0 ? item.duracaoSegundos : 60}',
+    );
     seriesController = TextEditingController(text: '${item.series}');
     repeticoesController = TextEditingController(text: '${item.repeticoes}');
     cargaController = TextEditingController(
@@ -4390,27 +5141,35 @@ class _ConfiguracaoExercicioDialogState
     repeticoesController.dispose();
     cargaController.dispose();
     descansoController.dispose();
+    duracaoController.dispose();
     super.dispose();
   }
 
   void salvar() {
     final series = int.tryParse(seriesController.text.trim());
-    final repeticoes = int.tryParse(repeticoesController.text.trim());
+    final porTempo = modo == ModoExercicio.tempo;
+    final comCarga = modo == ModoExercicio.carga;
+    final repeticoes = porTempo
+        ? 1
+        : int.tryParse(repeticoesController.text.trim());
     final cargaTexto = cargaController.text.trim().replaceAll(',', '.');
-    final carga = double.tryParse(cargaTexto);
+    final carga = comCarga ? double.tryParse(cargaTexto) : 0.0;
     final descanso = int.tryParse(descansoController.text.trim());
+    final duracao = porTempo ? int.tryParse(duracaoController.text.trim()) : 0;
 
     if (series == null ||
         repeticoes == null ||
         carga == null ||
         descanso == null ||
+        duracao == null ||
         series < 1 ||
         repeticoes < 1 ||
         !carga.isFinite ||
         carga < 0 ||
-        descanso < 0) {
+        descanso < 0 ||
+        (porTempo && duracao < 1)) {
       setState(() {
-        erroValidacao = 'Confira os valores. Séries e repetições devem ser maiores que zero; carga e descanso não podem ser negativos.';
+        erroValidacao = 'Confira os valores. Séries, repetições e tempo devem ser maiores que zero; carga e descanso não podem ser negativos.';
       });
       return;
     }
@@ -4426,7 +5185,9 @@ class _ConfiguracaoExercicioDialogState
         repeticoes: repeticoes,
         cargaKg: carga,
         descansoSegundos: descanso,
-        progressaoAtiva: progressaoAtiva,
+        progressaoAtiva: comCarga && progressaoAtiva,
+        modo: modo,
+        duracaoSegundos: duracao,
         workfitUltimaSessaoAjustada: item.workfitUltimaSessaoAjustada,
         workfitCicloRecuperado: item.workfitCicloRecuperado,
       ),
@@ -4451,37 +5212,65 @@ class _ConfiguracaoExercicioDialogState
               ),
             ),
             const SizedBox(height: 16),
+            DropdownButtonFormField<ModoExercicio>(
+              initialValue: modo,
+              decoration: const InputDecoration(labelText: 'Tipo de exercício'),
+              items: [
+                for (final m in ModoExercicio.values)
+                  DropdownMenuItem(value: m, child: Text(m.rotulo)),
+              ],
+              onChanged: (valor) {
+                if (valor != null) setState(() => modo = valor);
+              },
+            ),
+            const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
                   child: TextField(
                     controller: seriesController,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Séries'),
+                    decoration: InputDecoration(
+                      labelText: modo == ModoExercicio.tempo
+                          ? 'Vezes'
+                          : 'Séries',
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: TextField(
-                    controller: repeticoesController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Repetições'),
-                  ),
+                  child: modo == ModoExercicio.tempo
+                      ? TextField(
+                          controller: duracaoController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Duração (segundos)',
+                          ),
+                        )
+                      : TextField(
+                          controller: repeticoesController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Repetições',
+                          ),
+                        ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: cargaController,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-                signed: false,
+            if (modo == ModoExercicio.carga) ...[
+              const SizedBox(height: 12),
+              TextField(
+                controller: cargaController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                  signed: false,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'Carga (kg)',
+                  hintText: '0 para peso corporal ou não informado',
+                ),
               ),
-              decoration: const InputDecoration(
-                labelText: 'Carga (kg)',
-                hintText: '0 para peso corporal ou não informado',
-              ),
-            ),
+            ],
             const SizedBox(height: 12),
             TextField(
               controller: descansoController,
@@ -4490,15 +5279,16 @@ class _ConfiguracaoExercicioDialogState
                 labelText: 'Descanso entre séries (segundos)',
               ),
             ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Sugerir progressão'),
-              subtitle: const Text(
-                'Ajustes de carga ou repetições exigem sua confirmação.',
+            if (modo == ModoExercicio.carga)
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Sugerir progressão'),
+                subtitle: const Text(
+                  'Ajustes de carga ou repetições exigem sua confirmação.',
+                ),
+                value: progressaoAtiva,
+                onChanged: (valor) => setState(() => progressaoAtiva = valor),
               ),
-              value: progressaoAtiva,
-              onChanged: (valor) => setState(() => progressaoAtiva = valor),
-            ),
             if (erroValidacao != null) ...[
               const SizedBox(height: 10),
               Text(
@@ -4944,6 +5734,10 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
     final total = sessao.series
         .where((x) => x.exercicioId == s.exercicioId)
         .length;
+    if (s.modo == ModoExercicio.tempo) {
+      return '${s.nomeExercicio}. Série ${s.numeroSerie} de $total: '
+          '${formatarDuracaoCurta(s.duracaoPlanejadaSegundos)}.';
+    }
     return MensagensVoz.exercicioAtual(
       nome: s.nomeExercicio,
       serie: s.numeroSerie,
@@ -5103,15 +5897,25 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${serie.repeticoesRealizadas} repetições • '
-                      '${formatarCarga(serie.cargaKg)}',
+                      switch (serie.modo) {
+                        ModoExercicio.tempo => formatarDuracaoCurta(
+                          serie.duracaoRealizadaSegundos,
+                        ),
+                        ModoExercicio.repeticoes =>
+                          '${serie.repeticoesRealizadas} repetições',
+                        ModoExercicio.carga =>
+                          '${serie.repeticoesRealizadas} repetições • '
+                              '${formatarCarga(serie.cargaKg)}',
+                      },
                       style: const TextStyle(color: textoSecundario),
                     ),
                   ],
                 ),
               ),
               IconButton(
-                tooltip: 'Editar carga e repetições',
+                tooltip: serie.modo == ModoExercicio.carga
+                    ? 'Editar carga e repetições'
+                    : 'Editar série',
                 onPressed: bloqueada ? null : () => editarSerie(serie),
                 icon: const Icon(Icons.edit_outlined, color: verde),
               ),
@@ -5436,6 +6240,23 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
                                   id,
                                 ),
                               ),
+                              if (EdicaoApp.midiaHabilitada)
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                  ),
+                                  child: MidiasDoExercicio(
+                                    midias:
+                                        widget.exercicios
+                                            .where(
+                                              (e) =>
+                                                  e.id == primeira.exercicioId,
+                                            )
+                                            .firstOrNull
+                                            ?.midias ??
+                                        const [],
+                                  ),
+                                ),
                               ...series.map(construirSerie),
                               const SizedBox(height: 5),
                             ],
@@ -5610,7 +6431,15 @@ class ResumoTreinoPage extends StatelessWidget {
                         final carga = serie.cargaKg == 0
                             ? 'Peso corporal / não informado'
                             : '${serie.cargaKg.toStringAsFixed(serie.cargaKg % 1 == 0 ? 0 : 1)} kg';
-
+                        final detalhe = switch (serie.modo) {
+                          ModoExercicio.tempo => formatarDuracaoCurta(
+                            serie.duracaoRealizadaSegundos,
+                          ),
+                          ModoExercicio.repeticoes =>
+                            '${serie.repeticoesRealizadas} rep.',
+                          ModoExercicio.carga =>
+                            '${serie.repeticoesRealizadas} rep. • $carga',
+                        };
                         return Padding(
                           padding: const EdgeInsets.symmetric(vertical: 4),
                           child: Row(
@@ -5627,8 +6456,7 @@ class ResumoTreinoPage extends StatelessWidget {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  'Série ${serie.numeroSerie} • '
-                                  '${serie.repeticoesRealizadas} rep. • $carga',
+                                  'Série ${serie.numeroSerie} • $detalhe',
                                 ),
                               ),
                             ],
@@ -5692,11 +6520,15 @@ class EditarSerieDialog extends StatefulWidget {
 class _EditarSerieDialogState extends State<EditarSerieDialog> {
   late final TextEditingController repeticoesController;
   late final TextEditingController cargaController;
+  late final TextEditingController duracaoController;
   String? erro;
 
   @override
   void initState() {
     super.initState();
+    duracaoController = TextEditingController(
+      text: '${widget.serie.duracaoRealizadaSegundos}',
+    );
     repeticoesController = TextEditingController(
       text: '${widget.serie.repeticoesRealizadas}',
     );
@@ -5711,14 +6543,27 @@ class _EditarSerieDialogState extends State<EditarSerieDialog> {
   void dispose() {
     repeticoesController.dispose();
     cargaController.dispose();
+    duracaoController.dispose();
     super.dispose();
   }
 
   void salvar() {
+    if (widget.serie.modo == ModoExercicio.tempo) {
+      final duracao = int.tryParse(duracaoController.text.trim());
+      if (duracao == null || duracao < 0) {
+        setState(() => erro = 'Informe o tempo em segundos, sem negativos.');
+        return;
+      }
+      Navigator.of(
+        context,
+      ).pop(widget.serie.copiar(duracaoRealizadaSegundos: duracao));
+      return;
+    }
+
     final repeticoes = int.tryParse(repeticoesController.text.trim());
-    final carga = double.tryParse(
-      cargaController.text.trim().replaceAll(',', '.'),
-    );
+    final carga = widget.serie.modo == ModoExercicio.carga
+        ? double.tryParse(cargaController.text.trim().replaceAll(',', '.'))
+        : 0.0;
 
     if (repeticoes == null ||
         repeticoes < 0 ||
@@ -5738,6 +6583,7 @@ class _EditarSerieDialogState extends State<EditarSerieDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final modo = widget.serie.modo;
     return AlertDialog(
       title: Text('Série ${widget.serie.numeroSerie}'),
       content: SingleChildScrollView(
@@ -5750,30 +6596,44 @@ class _EditarSerieDialogState extends State<EditarSerieDialog> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Meta: ${widget.serie.repeticoesPlanejadas} repetições',
+              modo == ModoExercicio.tempo
+                  ? 'Meta: ${formatarDuracaoCurta(widget.serie.duracaoPlanejadaSegundos)}'
+                  : 'Meta: ${widget.serie.repeticoesPlanejadas} repetições',
               style: const TextStyle(color: textoSecundario),
             ),
             const SizedBox(height: 16),
-            TextField(
-              controller: repeticoesController,
-              autofocus: true,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Repetições realizadas',
+            if (modo == ModoExercicio.tempo)
+              TextField(
+                controller: duracaoController,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Tempo realizado (segundos)',
+                ),
+              )
+            else
+              TextField(
+                controller: repeticoesController,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Repetições realizadas',
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: cargaController,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-                signed: false,
+            if (modo == ModoExercicio.carga) ...[
+              const SizedBox(height: 12),
+              TextField(
+                controller: cargaController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                  signed: false,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'Carga utilizada (kg)',
+                  hintText: '0 para peso corporal ou não informado',
+                ),
               ),
-              decoration: const InputDecoration(
-                labelText: 'Carga utilizada (kg)',
-                hintText: '0 para peso corporal ou não informado',
-              ),
-            ),
+            ],
             if (erro != null) ...[
               const SizedBox(height: 12),
               Text(erro!, style: const TextStyle(color: Colors.redAccent)),

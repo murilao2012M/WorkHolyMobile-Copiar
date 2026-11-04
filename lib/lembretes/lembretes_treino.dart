@@ -7,6 +7,7 @@ import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../dados/workholy_banco.dart';
+import '../agenda/avisos_agenda.dart';
 
 /// Dias usam o padrão do DateTime: 1 = segunda ... 7 = domingo.
 class ConfigLembretes {
@@ -136,6 +137,72 @@ class LembretesTreino {
     if (android == null) return false;
     return await android.requestNotificationsPermission() ?? false;
   }
+
+  /// Substitui todos os avisos da agenda pelos [avisos]. Só abre o pedido de
+  /// permissão se [pedirPermissao]; sem permissão, não agenda. Devolve uma
+  /// mensagem de erro, ou null se deu certo.
+  Future<String?> agendarAvisosDaAgenda(
+    List<AvisoAgenda> avisos, {
+    required bool pedirPermissao,
+  }) async {
+    try {
+      await _iniciar();
+      final pendentes = await _plugin.pendingNotificationRequests();
+      for (final p in pendentes) {
+        if (p.id >= idAvisoAgendaMin && p.id < idAvisoAgendaMax) {
+          await _plugin.cancel(id: p.id);
+        }
+      }
+      if (avisos.isEmpty) return null;
+      final android = _plugin
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >();
+      final permitido = pedirPermissao
+          ? await _permitido()
+          : (await android?.areNotificationsEnabled() ?? false);
+      if (!permitido) {
+        return 'Permita as notificações do aplicativo nas configurações do '
+            'aparelho para receber os avisos da agenda.';
+      }
+      final exato = await android?.canScheduleExactNotifications() ?? false;
+      for (final aviso in avisos) {
+        await _plugin.zonedSchedule(
+          id: aviso.id,
+          title: aviso.titulo,
+          body: aviso.corpo,
+          scheduledDate: tz.TZDateTime.from(aviso.quando, tz.local),
+          notificationDetails: const NotificationDetails(
+            android: AndroidNotificationDetails(
+              'agenda_alunos',
+              'Agenda dos alunos',
+              channelDescription: 'Avisos dos horários marcados com alunos.',
+              importance: Importance.high,
+              priority: Priority.high,
+            ),
+          ),
+          androidScheduleMode: exato
+              ? AndroidScheduleMode.exactAllowWhileIdle
+              : AndroidScheduleMode.inexactAllowWhileIdle,
+        );
+      }
+      return null;
+    } catch (erro) {
+      debugPrint('Falha ao agendar avisos da agenda: $erro');
+      return 'Não foi possível agendar os avisos da agenda neste aparelho.';
+    }
+  }
+
+  Future<int> lerAvisoAgenda() async {
+    final texto = await WorkHolyBanco.instancia.lerTexto(chaveAvisoAgenda);
+    final valor = int.tryParse(texto ?? '');
+    return valor != null && avisoAgendaOpcoes.contains(valor)
+        ? valor
+        : avisoAgendaPadrao;
+  }
+
+  Future<void> salvarAvisoAgenda(int minutos) => WorkHolyBanco.instancia
+      .salvarTexto(chaveAvisoAgenda, minutos.toString());
 
   /// Salva e reagenda. Devolve uma mensagem de erro, ou null se deu certo.
   Future<String?> aplicar(ConfigLembretes config) async {

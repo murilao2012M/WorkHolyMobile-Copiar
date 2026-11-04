@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import '../corrida/corrida_banco.dart';
 import '../dados/workholy_banco.dart';
+import '../edicao_app.dart';
 import 'backup_nuvem_firestore.dart';
 import 'coordenador_backup.dart';
 
@@ -42,7 +43,7 @@ class SincronizacaoUsuario {
   static final instancia = SincronizacaoUsuario._();
   static const habilitado = bool.fromEnvironment(
     'WORKHOLY_BACKUP_EXPERIMENTAL',
-    defaultValue: false,
+    defaultValue: EdicaoApp.personal,
   );
   static const chaveAtivado = '_workholy_backup_ativado_v1';
   final ValueNotifier<EstadoBackup> estado = ValueNotifier(
