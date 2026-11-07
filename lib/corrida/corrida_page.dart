@@ -448,7 +448,7 @@ class _CorridaPageState extends State<CorridaPage> {
     final resultado = await FlutterForegroundTask.startService(
       serviceId: 410,
       serviceTypes: const [ForegroundServiceTypes.location],
-      notificationTitle: 'WorkHoly — Corrida',
+      notificationTitle: 'Moveria — Corrida',
       notificationText: 'O registro da corrida está ativo.',
       callback: iniciarServicoCorrida,
     );

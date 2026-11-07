@@ -1,11 +1,7 @@
-
 import 'package:flutter/material.dart';
 
 class TelaBoasVindasPage extends StatelessWidget {
-  const TelaBoasVindasPage({
-    super.key,
-    required this.onComecar,
-  });
+  const TelaBoasVindasPage({super.key, required this.onComecar});
 
   final VoidCallback onComecar;
 
@@ -16,10 +12,7 @@ class TelaBoasVindasPage extends StatelessWidget {
     return Scaffold(
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 28,
-            vertical: 24,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
           child: Column(
             children: [
               const Spacer(flex: 2),
@@ -38,7 +31,7 @@ class TelaBoasVindasPage extends StatelessWidget {
               ),
               const SizedBox(height: 28),
               const Text(
-                'WorkHoly',
+                'Moveria',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 36,
@@ -89,10 +82,7 @@ class TelaBoasVindasPage extends StatelessWidget {
               Text(
                 'Seu próximo passo começa aqui.',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: cores.onSurfaceVariant,
-                ),
+                style: TextStyle(fontSize: 12, color: cores.onSurfaceVariant),
               ),
             ],
           ),

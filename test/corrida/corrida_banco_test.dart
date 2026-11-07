@@ -141,4 +141,44 @@ void main() {
     expect(finalizadas.single.id, 'corrida-finalizada');
     expect(finalizadas.single.fim.millisecondsSinceEpoch, 3000);
   });
+
+  test(
+    'restaura corridas concluídas sem remover corridas em andamento',
+    () async {
+      await banco.criar('corrida-aberta', 1000);
+      await banco.criar('corrida-antiga', 2000);
+      await banco.atualizar(
+        id: 'corrida-antiga',
+        duracaoSegundos: 30,
+        distanciaMetros: 300,
+        estado: 'finalizada',
+        rota: const [],
+        fimMs: 30000,
+      );
+
+      await banco.substituirFinalizadas([
+        {
+          'id': 'corrida-backup',
+          'inicio_ms': 4000,
+          'fim_ms': 50000,
+          'duracao_segundos': 46,
+          'distancia_metros': 600,
+          'estado': 'finalizada',
+          'rota_json': '[]',
+          'calorias_estimadas': 50,
+          'peso_kg': null,
+        },
+      ]);
+
+      final registros = await banco.listar();
+      expect(
+        registros.map((registro) => registro['id']),
+        containsAll(['corrida-aberta', 'corrida-backup']),
+      );
+      expect(
+        registros.map((registro) => registro['id']),
+        isNot(contains('corrida-antiga')),
+      );
+    },
+  );
 }

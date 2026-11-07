@@ -1,4 +1,4 @@
-# Operação Premium e privacidade — WorkHoly
+# Operação Premium e privacidade — Moveria
 
 ## Produto
 
@@ -10,7 +10,7 @@
 
 ## Regra de licença
 
-A licença pertence ao `uid` da conta WorkHoly. O aplicativo pode guardar uma
+A licença pertence ao `uid` da conta Moveria. O aplicativo pode guardar uma
 cópia para exibir o último estado offline, mas ela jamais é prova de acesso.
 O backend é a fonte de verdade e atualiza `entitlements/{uid}` somente após
 consultar a Google Play Developer API.
@@ -42,7 +42,7 @@ consultar a Google Play Developer API.
 
 O app trata identificadores de conta e dados de evolução física. Adote
 minimização: colete somente nome, e-mail e medições necessárias ao serviço.
-Dados de pagamento não passam pelos servidores do WorkHoly: são processados
+Dados de pagamento não passam pelos servidores do Moveria: são processados
 pela Google Play.
 
 Antes de produção, publicar Política de Privacidade e Termos contendo:

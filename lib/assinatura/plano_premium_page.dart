@@ -1,8 +1,5 @@
 import 'package:flutter/material.dart';
 
-const _verdePremium = Color(0xFFB7F34A);
-const _textoPremium = Color(0xFFA4AAA0);
-
 class PlanoPremiumPage extends StatelessWidget {
   const PlanoPremiumPage({super.key, this.recurso});
 
@@ -10,15 +7,17 @@ class PlanoPremiumPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cores = Theme.of(context).colorScheme;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('WorkHoly Premium')),
+      appBar: AppBar(title: const Text('Moveria Premium')),
       body: ListView(
         padding: const EdgeInsets.all(24),
         children: [
-          const Icon(
+          Icon(
             Icons.workspace_premium_outlined,
             size: 64,
-            color: _verdePremium,
+            color: cores.primary,
           ),
           const SizedBox(height: 16),
           const Text(
@@ -28,12 +27,12 @@ class PlanoPremiumPage extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             recurso == null
-                ? 'Desbloqueie os recursos avançados do WorkHoly.'
-                : 'O recurso “$recurso” faz parte do WorkHoly Premium.',
-            style: const TextStyle(color: _textoPremium),
+                ? 'Desbloqueie os recursos avançados do Moveria.'
+                : 'O recurso “$recurso” faz parte do Moveria Premium.',
+            style: TextStyle(color: cores.onSurfaceVariant),
           ),
           const SizedBox(height: 28),
-          const Card(
+          Card(
             child: Padding(
               padding: EdgeInsets.all(18),
               child: Column(
@@ -49,10 +48,13 @@ class PlanoPremiumPage extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 30,
                       fontWeight: FontWeight.bold,
-                      color: _verdePremium,
+                      color: cores.primary,
                     ),
                   ),
-                  Text('por mês', style: TextStyle(color: _textoPremium)),
+                  Text(
+                    'por mês',
+                    style: TextStyle(color: cores.onSurfaceVariant),
+                  ),
                   SizedBox(height: 18),
                   _Beneficio('Biblioteca de exercícios completa'),
                   _Beneficio('Metas pessoais com prazo'),
@@ -76,16 +78,16 @@ class PlanoPremiumPage extends StatelessWidget {
             icon: const Icon(Icons.play_arrow),
             label: const Text('Disponível em breve no Google Play'),
             style: FilledButton.styleFrom(
-              backgroundColor: _verdePremium,
-              foregroundColor: Colors.black,
+              backgroundColor: cores.primary,
+              foregroundColor: cores.onPrimary,
               minimumSize: const Size.fromHeight(52),
             ),
           ),
           const SizedBox(height: 12),
-          const Text(
+          Text(
             'A compra será feita com segurança pelo Google Play quando o aplicativo for publicado.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: _textoPremium, fontSize: 12),
+            style: TextStyle(color: cores.onSurfaceVariant, fontSize: 12),
           ),
         ],
       ),
@@ -102,7 +104,11 @@ class _Beneficio extends StatelessWidget {
     padding: const EdgeInsets.only(bottom: 10),
     child: Row(
       children: [
-        const Icon(Icons.check_circle, color: _verdePremium, size: 20),
+        Icon(
+          Icons.check_circle,
+          color: Theme.of(context).colorScheme.primary,
+          size: 20,
+        ),
         const SizedBox(width: 10),
         Expanded(child: Text(texto)),
       ],

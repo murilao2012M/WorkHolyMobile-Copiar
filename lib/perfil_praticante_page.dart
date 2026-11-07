@@ -10,7 +10,6 @@ import 'assinatura/plano_premium_page.dart';
 
 const _perfilKey = 'workholy_perfil_praticante_v1';
 const _verdePerfil = Color(0xFFB7F34A);
-const _textoPerfil = Color(0xFFA4AAA0);
 
 class PerfilPraticantePage extends StatefulWidget {
   const PerfilPraticantePage({super.key});
@@ -19,6 +18,8 @@ class PerfilPraticantePage extends StatefulWidget {
 }
 
 class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
+  Color get _textoPerfil => Theme.of(context).colorScheme.onSurfaceVariant;
+
   final _formKey = GlobalKey<FormState>();
   final _nome = TextEditingController();
   final _altura = TextEditingController();
@@ -490,7 +491,7 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
     'Metas pessoais',
     Icons.flag_outlined,
     [
-      const Text(
+      Text(
         'Defina valor inicial, alvo e prazo.',
         style: TextStyle(color: _textoPerfil),
       ),
@@ -567,7 +568,7 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
     'Evolução física',
     Icons.show_chart,
     [
-      const Text(
+      Text(
         'Avaliações têm data e não apagam as anteriores.',
         style: TextStyle(color: _textoPerfil),
       ),
@@ -625,7 +626,7 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: .05),
+          color: Theme.of(context).colorScheme.surfaceContainerLow,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
@@ -640,7 +641,7 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
             Text(titulo),
             Text(
               detalhe,
-              style: const TextStyle(fontSize: 12, color: _textoPerfil),
+              style: TextStyle(fontSize: 12, color: _textoPerfil),
             ),
             if (p != null)
               Padding(
@@ -656,7 +657,7 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
       ),
     );
     return _secao('Consistência semanal', Icons.calendar_view_week_outlined, [
-      const Text(
+      Text(
         'Registros reais concluídos nesta semana.',
         style: TextStyle(color: _textoPerfil),
       ),
@@ -703,7 +704,7 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
             ],
           ),
           const SizedBox(height: 12),
-          const Text(
+          Text(
             'Crie metas, registre avaliações físicas e acompanhe seus gráficos de desempenho.',
             style: TextStyle(color: _textoPerfil),
           ),
@@ -719,8 +720,8 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
             icon: const Icon(Icons.workspace_premium_outlined),
             label: const Text('Conhecer Premium — R\$ 9,90'),
             style: FilledButton.styleFrom(
-              backgroundColor: _verdePerfil,
-              foregroundColor: Colors.black,
+              backgroundColor: Theme.of(context).colorScheme.primary,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
             ),
           ),
         ],
@@ -745,7 +746,7 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 6),
-          const Text(
+          Text(
             'Metas, evolução e consistência em um só lugar.',
             style: TextStyle(color: _textoPerfil),
           ),
@@ -841,7 +842,7 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
             ),
           ]),
           _secao('Medidas atuais', Icons.straighten, [
-            const Text(
+            Text(
               'Use “Nova avaliação” para preservar o histórico.',
               style: TextStyle(color: _textoPerfil),
             ),
@@ -871,8 +872,8 @@ class _PerfilPraticantePageState extends State<PerfilPraticantePage> {
                   : const Icon(Icons.save_outlined),
               label: Text(_salvando ? 'Salvando...' : 'Salvar dados atuais'),
               style: FilledButton.styleFrom(
-                backgroundColor: _verdePerfil,
-                foregroundColor: Colors.black,
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
               ),
             ),
           ),

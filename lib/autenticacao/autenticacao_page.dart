@@ -1,8 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-const _verde = Color(0xFFB7F34A);
-
 class AutenticacaoPage extends StatefulWidget {
   const AutenticacaoPage({super.key});
 
@@ -97,10 +95,14 @@ class _AutenticacaoPageState extends State<AutenticacaoPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Icon(Icons.fitness_center, size: 68, color: _verde),
+                Icon(
+                  Icons.fitness_center,
+                  size: 68,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
                 const SizedBox(height: 18),
                 Text(
-                  _criandoConta ? 'Crie sua conta' : 'Entre no WorkHoly',
+                  _criandoConta ? 'Crie sua conta' : 'Entre no Moveria',
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     fontSize: 27,
@@ -113,7 +115,9 @@ class _AutenticacaoPageState extends State<AutenticacaoPage> {
                       ? 'Salve seu progresso e acesse em qualquer dispositivo.'
                       : 'Use seu e-mail para continuar.',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.grey),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: 30),
                 TextFormField(
@@ -158,8 +162,8 @@ class _AutenticacaoPageState extends State<AutenticacaoPage> {
                 FilledButton(
                   onPressed: _enviando ? null : _enviar,
                   style: FilledButton.styleFrom(
-                    backgroundColor: _verde,
-                    foregroundColor: Colors.black,
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
                     minimumSize: const Size.fromHeight(52),
                   ),
                   child: Text(
@@ -225,10 +229,10 @@ class _ConfirmarEmailPageState extends State<ConfirmarEmailPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(
+              Icon(
                 Icons.mark_email_unread_outlined,
                 size: 64,
-                color: _verde,
+                color: Theme.of(context).colorScheme.primary,
               ),
               const SizedBox(height: 20),
               const Text(

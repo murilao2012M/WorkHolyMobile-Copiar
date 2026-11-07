@@ -21,14 +21,18 @@ void main() {
     await Firebase.initializeApp();
   });
 
-  testWidgets('WorkHoly inicia com a tela principal do aplicativo', (
+  testWidgets('Moveria inicia com a tela principal do aplicativo', (
     tester,
   ) async {
-    await tester.pumpWidget(const WorkHolyApp());
+    await tester.pumpWidget(const MoveriaApp());
 
     await tester.pump();
 
-    expect(find.byType(WorkHolyApp), findsOneWidget);
+    expect(find.byType(MoveriaApp), findsOneWidget);
     expect(find.byType(MaterialApp), findsOneWidget);
+    expect(
+      tester.widget<MaterialApp>(find.byType(MaterialApp)).title,
+      'Moveria',
+    );
   });
 }

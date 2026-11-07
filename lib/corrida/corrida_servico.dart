@@ -98,7 +98,7 @@ class CorridaTaskHandler extends TaskHandler {
 
       _salvarEmSegundoPlano();
       FlutterForegroundTask.updateService(
-        notificationTitle: 'WorkHoly — Corrida em andamento',
+        notificationTitle: 'Moveria — Corrida em andamento',
         notificationText:
             '${(_distancia / 1000).toStringAsFixed(2)} km • '
             '${_formatarTempoCurto(_duracaoSegundos)}',
@@ -414,7 +414,7 @@ class CorridaTaskHandler extends TaskHandler {
     await _gps?.cancel();
     _gps = null;
     await FlutterForegroundTask.updateService(
-      notificationTitle: 'WorkHoly — Corrida pausada',
+      notificationTitle: 'Moveria — Corrida pausada',
       notificationText: 'Abra o aplicativo para retomar ou finalizar.',
     );
     await _salvarSeNecessario(forcar: true);

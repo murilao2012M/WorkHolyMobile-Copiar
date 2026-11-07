@@ -1,8 +1,11 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
+
+import '../alunos/alunos_modelos.dart';
 
 /// Banco SQLite central do WorkHoly.
 ///
@@ -11,11 +14,13 @@ import 'package:sqflite/sqflite.dart';
 /// como uma cópia de contingência; depois da migração o aplicativo lê e grava
 /// exclusivamente neste banco.
 class WorkHolyBanco {
-  WorkHolyBanco._();
+  WorkHolyBanco._() : _caminhoBanco = null;
+
+  WorkHolyBanco.paraTestes({required String caminho}) : _caminhoBanco = caminho;
 
   static final WorkHolyBanco instancia = WorkHolyBanco._();
 
-  static const _versao = 2;
+  static const _versao = 3;
   static const _chaveMigracaoLegada = '_migracao_shared_preferences_v1';
 
   static const _tabelaConfiguracoes = 'configuracoes';
@@ -25,6 +30,8 @@ class WorkHolyBanco {
   static const _tabelaSessoesTreino = 'sessoes_treino';
   static const _tabelaMetasPessoais = 'metas_pessoais';
   static const _tabelaAvaliacoesFisicas = 'avaliacoes_fisicas';
+  static const _tabelaAlunos = 'alunos';
+  static const _tabelaAnotacoesAlunos = 'anotacoes_alunos';
 
   static const _chaveTreinos = 'workholy_treinos_v1';
   static const _chaveExercicios = 'workholy_exercicios_v1';
@@ -52,6 +59,7 @@ class WorkHolyBanco {
 
   Database? _db;
   Future<Database>? _aberturaEmAndamento;
+  final String? _caminhoBanco;
 
   Future<Database> get database {
     final db = _db;
@@ -64,10 +72,18 @@ class WorkHolyBanco {
     await database;
   }
 
+  Future<void> fechar() async {
+    final db = _db;
+    _db = null;
+    _aberturaEmAndamento = null;
+    if (db != null) await db.close();
+  }
+
   Future<Database> _abrirBanco() async {
-    final diretorio = await getDatabasesPath();
+    final caminho =
+        _caminhoBanco ?? p.join(await getDatabasesPath(), 'workholy.db');
     final db = await openDatabase(
-      p.join(diretorio, 'workholy.db'),
+      caminho,
       version: _versao,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
@@ -128,10 +144,14 @@ class WorkHolyBanco {
           'CREATE INDEX idx_sessoes_treino_inicio ON $_tabelaSessoesTreino(inicio_ms DESC)',
         );
         await _criarTabelasDePerfil(db);
+        await _criarTabelasDeAlunos(db);
       },
       onUpgrade: (db, versaoAntiga, versaoNova) async {
         if (versaoAntiga < 2) {
           await _criarTabelasDePerfil(db);
+        }
+        if (versaoAntiga < 3) {
+          await _criarTabelasDeAlunos(db);
         }
       },
     );
@@ -165,6 +185,34 @@ class WorkHolyBanco {
     await executor.execute(
       'CREATE INDEX IF NOT EXISTS idx_avaliacoes_fisicas_data '
       'ON $_tabelaAvaliacoesFisicas(data_ms DESC)',
+    );
+  }
+
+  Future<void> _criarTabelasDeAlunos(DatabaseExecutor executor) async {
+    await executor.execute('''
+      CREATE TABLE IF NOT EXISTS $_tabelaAlunos (
+        id TEXT PRIMARY KEY NOT NULL,
+        nome TEXT NOT NULL,
+        status TEXT NOT NULL,
+        inicio_ms INTEGER NOT NULL,
+        dados_json TEXT NOT NULL
+      )
+    ''');
+    await executor.execute(
+      'CREATE INDEX IF NOT EXISTS idx_alunos_nome ON $_tabelaAlunos(nome COLLATE NOCASE)',
+    );
+    await executor.execute('''
+      CREATE TABLE IF NOT EXISTS $_tabelaAnotacoesAlunos (
+        id TEXT PRIMARY KEY NOT NULL,
+        aluno_id TEXT NOT NULL,
+        texto TEXT NOT NULL,
+        criada_ms INTEGER NOT NULL,
+        FOREIGN KEY(aluno_id) REFERENCES $_tabelaAlunos(id) ON DELETE CASCADE
+      )
+    ''');
+    await executor.execute(
+      'CREATE INDEX IF NOT EXISTS idx_anotacoes_aluno_data '
+      'ON $_tabelaAnotacoesAlunos(aluno_id, criada_ms DESC)',
     );
   }
 
@@ -323,13 +371,31 @@ class WorkHolyBanco {
   List<Map<String, dynamic>> _decodificarRegistros(
     List<Map<String, Object?>> rows,
   ) {
-    return rows.map((row) {
-      final valor = jsonDecode(row['dados_json']! as String);
-      if (valor is! Map) {
-        throw FormatException('Um registro do banco tem JSON inválido.');
+    final registros = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      try {
+        final valor = jsonDecode(row['dados_json']! as String);
+        if (valor is! Map) {
+          throw const FormatException('O registro não contém um objeto JSON.');
+        }
+        registros.add(Map<String, dynamic>.from(valor));
+      } on FormatException catch (erro, stackTrace) {
+        developer.log(
+          'Registro inválido ignorado durante a leitura do banco.',
+          name: 'workholy.database',
+          error: erro,
+          stackTrace: stackTrace,
+        );
+      } on TypeError catch (erro, stackTrace) {
+        developer.log(
+          'Registro inválido ignorado durante a leitura do banco.',
+          name: 'workholy.database',
+          error: erro,
+          stackTrace: stackTrace,
+        );
       }
-      return Map<String, dynamic>.from(valor);
-    }).toList();
+    }
+    return registros;
   }
 
   Future<void> salvarDadosTreino({
@@ -471,6 +537,150 @@ class WorkHolyBanco {
   Future<void> excluirAvaliacaoFisica(String id) async {
     final db = await database;
     await db.delete(_tabelaAvaliacoesFisicas, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<List<Aluno>> listarAlunos() async {
+    final db = await database;
+    final rows = await db.query(
+      _tabelaAlunos,
+      orderBy: 'nome COLLATE NOCASE ASC',
+    );
+    return rows.map((row) {
+      final dados = jsonDecode(row['dados_json']! as String);
+      if (dados is! Map) {
+        throw const FormatException('Registro de aluno inválido no banco.');
+      }
+      return Aluno.fromJson(Map<String, dynamic>.from(dados));
+    }).toList();
+  }
+
+  Future<void> salvarAluno(Aluno aluno) async {
+    if (aluno.nome.trim().isEmpty) {
+      throw ArgumentError.value(aluno.nome, 'aluno.nome', 'Nome obrigatório.');
+    }
+    final db = await database;
+    await db.insert(_tabelaAlunos, {
+      'id': aluno.id,
+      'nome': aluno.nome.trim(),
+      'status': aluno.status,
+      'inicio_ms': aluno.inicio.millisecondsSinceEpoch,
+      'dados_json': jsonEncode(aluno.toJson()),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<void> excluirAluno(String id) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete(
+        _tabelaAnotacoesAlunos,
+        where: 'aluno_id = ?',
+        whereArgs: [id],
+      );
+      final sessoes = await txn.query(_tabelaSessoesTreino);
+      for (final sessao in sessoes) {
+        try {
+          final json = jsonDecode(sessao['dados_json']! as String);
+          if (json is Map && json['alunoId'] == id) {
+            final dados = Map<String, dynamic>.from(json)..['alunoId'] = null;
+            await txn.update(
+              _tabelaSessoesTreino,
+              {'dados_json': jsonEncode(dados)},
+              where: 'id = ?',
+              whereArgs: [sessao['id']],
+            );
+          }
+        } on FormatException catch (erro, stackTrace) {
+          developer.log(
+            'Sessão inválida mantida sem alterar durante a exclusão do aluno.',
+            name: 'workholy.database',
+            error: erro,
+            stackTrace: stackTrace,
+          );
+        } on TypeError catch (erro, stackTrace) {
+          developer.log(
+            'Sessão inválida mantida sem alterar durante a exclusão do aluno.',
+            name: 'workholy.database',
+            error: erro,
+            stackTrace: stackTrace,
+          );
+        }
+      }
+      await txn.delete(_tabelaAlunos, where: 'id = ?', whereArgs: [id]);
+    });
+  }
+
+  Future<List<AnotacaoAluno>> listarAnotacoesAluno(String alunoId) async {
+    final db = await database;
+    final rows = await db.query(
+      _tabelaAnotacoesAlunos,
+      where: 'aluno_id = ?',
+      whereArgs: [alunoId],
+      orderBy: 'criada_ms DESC',
+    );
+    return rows.map(AnotacaoAluno.fromRegistro).toList();
+  }
+
+  Future<void> salvarAnotacaoAluno(AnotacaoAluno anotacao) async {
+    if (anotacao.texto.trim().isEmpty) {
+      throw ArgumentError.value(
+        anotacao.texto,
+        'anotacao.texto',
+        'A anotação não pode ficar vazia.',
+      );
+    }
+    final db = await database;
+    await db.insert(
+      _tabelaAnotacoesAlunos,
+      anotacao.paraRegistro(),
+      conflictAlgorithm: ConflictAlgorithm.abort,
+    );
+  }
+
+  Future<void> excluirAnotacaoAluno(String id) async {
+    final db = await database;
+    await db.delete(_tabelaAnotacoesAlunos, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<List<Aluno>> listarAlunosParaBackup() async => listarAlunos();
+
+  Future<List<AnotacaoAluno>> listarAnotacoesParaBackup() async {
+    final db = await database;
+    final rows = await db.query(
+      _tabelaAnotacoesAlunos,
+      orderBy: 'criada_ms DESC',
+    );
+    return rows.map(AnotacaoAluno.fromRegistro).toList();
+  }
+
+  Future<void> substituirAlunosEAnotacoes({
+    required List<Aluno> alunos,
+    required List<AnotacaoAluno> anotacoes,
+  }) async {
+    final idsAlunos = alunos.map((aluno) => aluno.id).toSet();
+    if (idsAlunos.length != alunos.length ||
+        anotacoes.any((anotacao) => !idsAlunos.contains(anotacao.alunoId))) {
+      throw const FormatException(
+        'Backup contém aluno duplicado ou anotação sem aluno.',
+      );
+    }
+
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete(_tabelaAnotacoesAlunos);
+      await txn.delete(_tabelaAlunos);
+      for (final aluno in alunos) {
+        await txn.insert(_tabelaAlunos, {
+          'id': aluno.id,
+          'nome': aluno.nome,
+          'status': aluno.status,
+          'inicio_ms': aluno.inicio.millisecondsSinceEpoch,
+          'dados_json': jsonEncode(aluno.toJson()),
+        });
+      }
+      for (final anotacao in anotacoes) {
+        await txn.insert(_tabelaAnotacoesAlunos, anotacao.paraRegistro());
+      }
+    });
   }
 
   /// Conta sessões encerradas no intervalo [inicio, fim), usando a data de

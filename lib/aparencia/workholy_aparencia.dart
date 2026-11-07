@@ -81,8 +81,8 @@ class WorkHolyAparencia extends ChangeNotifier {
     final scheme = ColorScheme.fromSeed(
       seedColor: destaque,
       brightness: brilho,
-      primary: destaque,
       surface: superficieTema,
+      contrastLevel: 0.25,
     );
 
     return ThemeData(
@@ -92,6 +92,16 @@ class WorkHolyAparencia extends ChangeNotifier {
       scaffoldBackgroundColor: fundoTema,
       cardColor: superficieTema,
       dividerColor: borda,
+      cardTheme: CardThemeData(
+        color: superficieTema,
+        surfaceTintColor: Colors.transparent,
+      ),
+      textTheme: Typography.material2021(
+        platform: TargetPlatform.android,
+      ).black.apply(
+        bodyColor: textoPrincipal,
+        displayColor: textoPrincipal,
+      ),
       appBarTheme: AppBarTheme(
         backgroundColor: fundoTema,
         foregroundColor: textoPrincipal,
@@ -112,9 +122,15 @@ class WorkHolyAparencia extends ChangeNotifier {
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: destaque,
-          foregroundColor: escuro ? Colors.black : Colors.black,
+          backgroundColor: scheme.primary,
+          foregroundColor: scheme.onPrimary,
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: scheme.primary,
+          foregroundColor: scheme.onPrimary,
         ),
       ),
     );

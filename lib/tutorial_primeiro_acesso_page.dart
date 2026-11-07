@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 
 class TutorialPrimeiroAcessoPage extends StatefulWidget {
@@ -17,7 +16,7 @@ class _TutorialPrimeiroAcessoPageState
   final List<_EtapaTutorial> _etapas = const [
     _EtapaTutorial(
       icone: Icons.waving_hand_outlined,
-      titulo: 'Bem-vindo ao WorkHoly!',
+      titulo: 'Bem-vindo ao Moveria!',
       descricao:
           'Organize seus treinos, acompanhe suas atividades e mantenha '
           'seu planejamento de treinamento em um só lugar.',
@@ -90,10 +89,7 @@ class _TutorialPrimeiroAcessoPageState
         title: const Text('Primeiros passos'),
         automaticallyImplyLeading: false,
         actions: [
-          TextButton(
-            onPressed: _pular,
-            child: const Text('Pular'),
-          ),
+          TextButton(onPressed: _pular, child: const Text('Pular')),
           const SizedBox(width: 8),
         ],
       ),
@@ -144,8 +140,7 @@ class _TutorialPrimeiroAcessoPageState
                     return SingleChildScrollView(
                       child: ConstrainedBox(
                         constraints: BoxConstraints(
-                          minHeight:
-                              MediaQuery.sizeOf(context).height * 0.48,
+                          minHeight: MediaQuery.sizeOf(context).height * 0.48,
                         ),
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -199,9 +194,8 @@ class _TutorialPrimeiroAcessoPageState
                                   Expanded(
                                     child: Text(
                                       item.dica,
-                                      style: tema.textTheme.bodyMedium?.copyWith(
-                                        height: 1.4,
-                                      ),
+                                      style: tema.textTheme.bodyMedium
+                                          ?.copyWith(height: 1.4),
                                     ),
                                   ),
                                 ],

@@ -176,6 +176,32 @@ class CorridaBanco {
     return db.query('corridas', orderBy: 'inicio_ms DESC');
   }
 
+  Future<List<Map<String, Object?>>> listarRegistrosFinalizados() async {
+    final db = await database;
+    return db.query(
+      'corridas',
+      where: 'estado = ?',
+      whereArgs: const ['finalizada'],
+      orderBy: 'inicio_ms DESC',
+    );
+  }
+
+  Future<void> substituirFinalizadas(
+    List<Map<String, Object?>> registros,
+  ) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete(
+        'corridas',
+        where: 'estado = ?',
+        whereArgs: const ['finalizada'],
+      );
+      for (final registro in registros) {
+        await txn.insert('corridas', registro);
+      }
+    });
+  }
+
   Future<List<CorridaConcluida>> listarFinalizadas() async {
     final db = await database;
 

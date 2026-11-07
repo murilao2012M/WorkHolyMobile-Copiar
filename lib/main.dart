@@ -1,14 +1,24 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import 'dados/workholy_banco.dart';
+import 'dados/workholy_modelos.dart';
+import 'alunos/alunos_page.dart';
+export 'dados/workholy_modelos.dart';
+import 'aparencia/workholy_cores.dart';
+export 'aparencia/workholy_cores.dart';
+
+import 'preferencias/backup_treino_page.dart';
+import 'preferencias/metas_lembretes_page.dart';
 import 'perfil_praticante_page.dart';
 import 'aparencia/workholy_aparencia.dart';
 import 'aparencia/aparencia_page.dart';
 import 'preferencias/preferencias_treino_page.dart';
+import 'preferencias/unidade_carga.dart';
 import 'tutorial_primeiro_acesso_page.dart';
 import 'exercicios/biblioteca_exercicios.dart';
 import 'corrida/corrida_banco.dart';
@@ -22,266 +32,21 @@ import 'tela_boas_vindas_page.dart';
 import 'firebase_options.dart';
 import 'autenticacao/autenticacao_page.dart';
 
-const Color verde = Color(0xFFB7F34A);
-const Color fundo = Color(0xFF10120F);
-const Color superficie = Color(0xFF1B1E19);
-const Color textoSecundario = Color(0xFFA4AAA0);
+const int descansoMaximoSegundos = 3600;
+const List<String> _diasTreino = [
+  'Seg',
+  'Ter',
+  'Qua',
+  'Qui',
+  'Sex',
+  'Sáb',
+  'Dom',
+];
 
-int _contadorIds = 0;
-
-String novoId(String prefixo) {
-  _contadorIds++;
-  return '$prefixo-${DateTime.now().microsecondsSinceEpoch}-$_contadorIds';
-}
-
-// ============================================================
-// MODELOS
-// ============================================================
-
-class Treino {
-  final String id;
-  final String nome;
-  final String objetivo;
-
-  // Campo mantido para compatibilidade com os dados antigos.
-  final int exercicios;
-
-  Treino({
-    String? id,
-    required this.nome,
-    required this.objetivo,
-    this.exercicios = 0,
-  }) : id = id ?? novoId('treino');
-
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'nome': nome,
-    'objetivo': objetivo,
-    'exercicios': exercicios,
-  };
-
-  factory Treino.fromJson(Map<String, dynamic> json) {
-    return Treino(
-      id: json['id'] is String ? json['id'] as String : null,
-      nome: json['nome']?.toString() ?? 'Treino sem nome',
-      objetivo: json['objetivo']?.toString() ?? '',
-      exercicios: (json['exercicios'] as num?)?.toInt() ?? 0,
-    );
-  }
-}
-
-class Exercicio {
-  final String id;
-  final String nome;
-  final String grupo;
-  final int series;
-  final int repeticoes;
-
-  Exercicio({
-    String? id,
-    required this.nome,
-    required this.grupo,
-    required this.series,
-    required this.repeticoes,
-  }) : id = id ?? novoId('exercicio');
-
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'nome': nome,
-    'grupo': grupo,
-    'series': series,
-    'repeticoes': repeticoes,
-  };
-
-  factory Exercicio.fromJson(Map<String, dynamic> json) {
-    return Exercicio(
-      id: json['id'] is String ? json['id'] as String : null,
-      nome: json['nome']?.toString() ?? 'Exercício sem nome',
-      grupo: json['grupo']?.toString() ?? 'Outros',
-      series: (json['series'] as num?)?.toInt() ?? 3,
-      repeticoes: (json['repeticoes'] as num?)?.toInt() ?? 12,
-    );
-  }
-}
-
-/// Representa um exercício associado a um treino específico.
-/// A configuração é independente da configuração do cadastro geral.
-class ItemTreino {
-  final String id;
-  final String treinoId;
-  final String exercicioId;
-  final int series;
-  final int repeticoes;
-  final double cargaKg;
-  final int descansoSegundos;
-
-  ItemTreino({
-    String? id,
-    required this.treinoId,
-    required this.exercicioId,
-    required this.series,
-    required this.repeticoes,
-    required this.cargaKg,
-    required this.descansoSegundos,
-  }) : id = id ?? novoId('item');
-
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'treinoId': treinoId,
-    'exercicioId': exercicioId,
-    'series': series,
-    'repeticoes': repeticoes,
-    'cargaKg': cargaKg,
-    'descansoSegundos': descansoSegundos,
-  };
-
-  factory ItemTreino.fromJson(Map<String, dynamic> json) {
-    return ItemTreino(
-      id: json['id'] is String ? json['id'] as String : null,
-      treinoId: json['treinoId']?.toString() ?? '',
-      exercicioId: json['exercicioId']?.toString() ?? '',
-      series: (json['series'] as num?)?.toInt() ?? 3,
-      repeticoes: (json['repeticoes'] as num?)?.toInt() ?? 12,
-      cargaKg: (json['cargaKg'] as num?)?.toDouble() ?? 0,
-      descansoSegundos: (json['descansoSegundos'] as num?)?.toInt() ?? 90,
-    );
-  }
-}
-
-class SerieExecutada {
-  final String id;
-  final String exercicioId;
-  final String nomeExercicio;
-  final int numeroSerie;
-  final int repeticoesPlanejadas;
-  final int repeticoesRealizadas;
-  final double cargaKg;
-  final bool concluida;
-  final int descansoSegundos;
-
-  const SerieExecutada({
-    required this.id,
-    required this.exercicioId,
-    required this.nomeExercicio,
-    required this.numeroSerie,
-    required this.repeticoesPlanejadas,
-    required this.repeticoesRealizadas,
-    required this.cargaKg,
-    required this.concluida,
-    required this.descansoSegundos,
-  });
-
-  SerieExecutada copiar({
-    int? repeticoesRealizadas,
-    double? cargaKg,
-    bool? concluida,
-  }) {
-    return SerieExecutada(
-      id: id,
-      exercicioId: exercicioId,
-      nomeExercicio: nomeExercicio,
-      numeroSerie: numeroSerie,
-      repeticoesPlanejadas: repeticoesPlanejadas,
-      repeticoesRealizadas: repeticoesRealizadas ?? this.repeticoesRealizadas,
-      cargaKg: cargaKg ?? this.cargaKg,
-      concluida: concluida ?? this.concluida,
-      descansoSegundos: descansoSegundos,
-    );
-  }
-
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'exercicioId': exercicioId,
-    'nomeExercicio': nomeExercicio,
-    'numeroSerie': numeroSerie,
-    'repeticoesPlanejadas': repeticoesPlanejadas,
-    'repeticoesRealizadas': repeticoesRealizadas,
-    'cargaKg': cargaKg,
-    'concluida': concluida,
-    'descansoSegundos': descansoSegundos,
-  };
-
-  factory SerieExecutada.fromJson(Map<String, dynamic> json) {
-    return SerieExecutada(
-      id: json['id']?.toString() ?? novoId('serie'),
-      exercicioId: json['exercicioId']?.toString() ?? '',
-      nomeExercicio: json['nomeExercicio']?.toString() ?? 'Exercício',
-      numeroSerie: (json['numeroSerie'] as num?)?.toInt() ?? 1,
-      repeticoesPlanejadas:
-          (json['repeticoesPlanejadas'] as num?)?.toInt() ?? 0,
-      repeticoesRealizadas:
-          (json['repeticoesRealizadas'] as num?)?.toInt() ?? 0,
-      cargaKg: (json['cargaKg'] as num?)?.toDouble() ?? 0,
-      concluida: json['concluida'] == true,
-      descansoSegundos: (json['descansoSegundos'] as num?)?.toInt() ?? 90,
-    );
-  }
-}
-
-class SessaoTreino {
-  final String id;
-  final String treinoId;
-  final String nomeTreino;
-  final DateTime inicio;
-  final DateTime? fim;
-  final List<SerieExecutada> series;
-
-  const SessaoTreino({
-    required this.id,
-    required this.treinoId,
-    required this.nomeTreino,
-    required this.inicio,
-    required this.fim,
-    required this.series,
-  });
-
-  bool get finalizada => fim != null;
-
-  int get seriesConcluidas => series.where((serie) => serie.concluida).length;
-
-  SessaoTreino copiar({
-    DateTime? fim,
-    bool limparFim = false,
-    List<SerieExecutada>? series,
-  }) {
-    return SessaoTreino(
-      id: id,
-      treinoId: treinoId,
-      nomeTreino: nomeTreino,
-      inicio: inicio,
-      fim: limparFim ? null : (fim ?? this.fim),
-      series: series ?? List<SerieExecutada>.from(this.series),
-    );
-  }
-
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'treinoId': treinoId,
-    'nomeTreino': nomeTreino,
-    'inicio': inicio.toIso8601String(),
-    'fim': fim?.toIso8601String(),
-    'series': series.map((serie) => serie.toJson()).toList(),
-  };
-
-  factory SessaoTreino.fromJson(Map<String, dynamic> json) {
-    final dadosSeries = json['series'] as List<dynamic>? ?? [];
-
-    return SessaoTreino(
-      id: json['id']?.toString() ?? novoId('sessao'),
-      treinoId: json['treinoId']?.toString() ?? '',
-      nomeTreino: json['nomeTreino']?.toString() ?? 'Treino',
-      inicio:
-          DateTime.tryParse(json['inicio']?.toString() ?? '') ?? DateTime.now(),
-      fim: DateTime.tryParse(json['fim']?.toString() ?? ''),
-      series: dadosSeries
-          .map(
-            (item) =>
-                SerieExecutada.fromJson(Map<String, dynamic>.from(item as Map)),
-          )
-          .toList(),
-    );
-  }
-}
+String _formatarDataTreino(DateTime data) =>
+    '${data.day.toString().padLeft(2, '0')}/'
+    '${data.month.toString().padLeft(2, '0')}/'
+    '${data.year.toString().padLeft(4, '0')}';
 
 enum _TipoAtividadePainel { musculacao, corrida }
 
@@ -318,6 +83,22 @@ class _DestinoNavegacao {
   final IconData iconeSelecionado;
 }
 
+class _SnapshotDadosTreino {
+  const _SnapshotDadosTreino({
+    required this.treinos,
+    required this.exercicios,
+    required this.itensTreino,
+    required this.sessoes,
+    required this.idsExerciciosSelecionados,
+  });
+
+  final List<Treino> treinos;
+  final List<Exercicio> exercicios;
+  final List<ItemTreino> itensTreino;
+  final List<SessaoTreino> sessoes;
+  final Set<String> idsExerciciosSelecionados;
+}
+
 // ============================================================
 // APLICATIVO
 // ============================================================
@@ -332,7 +113,7 @@ Future<void> main() async {
   FlutterForegroundTask.init(
     androidNotificationOptions: AndroidNotificationOptions(
       channelId: 'workholy_corrida',
-      channelName: 'Corrida WorkHoly',
+      channelName: 'Corrida Moveria',
       channelDescription:
           'Notificação exibida enquanto o GPS da corrida está ativo.',
       onlyAlertOnce: true,
@@ -348,17 +129,17 @@ Future<void> main() async {
     ),
   );
 
-  runApp(const WorkHolyApp());
+  runApp(const MoveriaApp());
 }
 
-class WorkHolyApp extends StatefulWidget {
-  const WorkHolyApp({super.key});
+class MoveriaApp extends StatefulWidget {
+  const MoveriaApp({super.key});
 
   @override
-  State<WorkHolyApp> createState() => _WorkHolyAppState();
+  State<MoveriaApp> createState() => _MoveriaAppState();
 }
 
-class _WorkHolyAppState extends State<WorkHolyApp> {
+class _MoveriaAppState extends State<MoveriaApp> {
   late final WorkHolyAparencia aparencia;
 
   @override
@@ -366,6 +147,7 @@ class _WorkHolyAppState extends State<WorkHolyApp> {
     super.initState();
     aparencia = WorkHolyAparencia();
     aparencia.carregar();
+    unawaited(PreferenciaUnidadeCarga.instancia.carregar());
   }
 
   @override
@@ -377,12 +159,15 @@ class _WorkHolyAppState extends State<WorkHolyApp> {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: aparencia,
+      animation: Listenable.merge([
+        aparencia,
+        PreferenciaUnidadeCarga.instancia,
+      ]),
       builder: (context, _) {
         final modo = aparencia.modo;
 
         return MaterialApp(
-          title: 'WorkHoly Mobile',
+          title: 'Moveria',
           debugShowCheckedModeBanner: false,
           theme: aparencia.criarTema(Brightness.light),
           darkTheme: aparencia.criarTema(Brightness.dark),
@@ -400,15 +185,9 @@ class _WorkHolyAppState extends State<WorkHolyApp> {
                 );
               }
               final usuario = snapshot.data;
-              debugPrint("Diagnóstico de Autenticação");
-              debugPrint('Estado do stream: ${snapshot.connectionState}');
-              debugPrint('Existe usuário: ${usuario != null}');
-              debugPrint('Email verificado: ${usuario?.emailVerified}');
-              debugPrint('Email: ${usuario?.email ?? "(nenhum)"}');
-
               if (usuario == null) return const AutenticacaoPage();
               if (!usuario.emailVerified) return const ConfirmarEmailPage();
-              return WorkHolyHome(aparencia: aparencia);
+              return MoveriaHome(aparencia: aparencia);
             },
           ),
         );
@@ -417,15 +196,15 @@ class _WorkHolyAppState extends State<WorkHolyApp> {
   }
 }
 
-class WorkHolyHome extends StatefulWidget {
-  const WorkHolyHome({super.key, required this.aparencia});
+class MoveriaHome extends StatefulWidget {
+  const MoveriaHome({super.key, required this.aparencia});
 
   final WorkHolyAparencia aparencia;
   @override
-  State<WorkHolyHome> createState() => _WorkHolyHomeState();
+  State<MoveriaHome> createState() => _MoveriaHomeState();
 }
 
-class _WorkHolyHomeState extends State<WorkHolyHome> {
+class _MoveriaHomeState extends State<MoveriaHome> {
   static const String chaveTutorialConcluido =
       'workholy_tutorial_primeiro_acesso_v1';
 
@@ -438,9 +217,11 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
   List<CorridaConcluida> corridasFinalizadas = [];
 
   int _ultimaLeituraCorridas = 0;
+  int _metaTreinosSemana = 3;
 
   int abaSelecionada = 0;
   bool carregando = true;
+  bool erroCarregamento = false;
 
   List<Treino> treinos = [];
 
@@ -452,20 +233,23 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
       TextEditingController();
   String _termoBuscaExercicios = '';
   final Set<String> _idsExerciciosSelecionados = <String>{};
-
-  // O histórico de sessões será desenvolvido na próxima etapa.
-  final List<String> historico = [];
+  final TextEditingController _buscaTreinosController = TextEditingController();
+  String _filtroGrupoTreinos = '';
+  int? _filtroDiaTreinos;
+  bool _somenteFavoritos = false;
 
   @override
   void initState() {
     super.initState();
     carregarDados();
     unawaited(carregarCorridasDoPainel());
+    unawaited(_carregarMetaTreinosSemana());
   }
 
   @override
   void dispose() {
     _buscaExerciciosController.dispose();
+    _buscaTreinosController.dispose();
     super.dispose();
   }
 
@@ -480,6 +264,19 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
       setState(() => corridasFinalizadas = corridas);
     } catch (erro) {
       debugPrint('Erro ao carregar corridas no painel: $erro');
+    }
+  }
+
+  Future<void> _carregarMetaTreinosSemana() async {
+    try {
+      final meta = await WorkHolyBanco.instancia.lerInteiro(
+        'workholy_meta_treinos_semana_v1',
+      );
+      if (!mounted || meta == null) return;
+      setState(() => _metaTreinosSemana = meta.clamp(1, 7).toInt());
+    } catch (erro, stackTrace) {
+      debugPrint('Erro ao carregar a meta semanal: $erro');
+      debugPrintStack(stackTrace: stackTrace);
     }
   }
 
@@ -528,7 +325,7 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
         await banco.salvarBooleano(chaveTutorialConcluido, true);
       }
     } catch (erro) {
-      debugPrint('Erro na apresentação inicial do WorkHoly: $erro');
+      debugPrint('Erro na apresentação inicial do Moveria: $erro');
     }
   }
 
@@ -544,9 +341,18 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
       final itensCarregados = dados.itensTreino
           .map(ItemTreino.fromJson)
           .toList();
-      final sessoesCarregadas = dados.sessoesTreino
-          .map(SessaoTreino.fromJson)
-          .toList();
+      final sessoesCarregadas = <SessaoTreino>[];
+      for (final registro in dados.sessoesTreino) {
+        try {
+          sessoesCarregadas.add(SessaoTreino.fromJson(registro));
+        } on FormatException catch (erro, stackTrace) {
+          debugPrint('Sessão inválida ignorada: $erro');
+          debugPrintStack(stackTrace: stackTrace);
+        } on TypeError catch (erro, stackTrace) {
+          debugPrint('Sessão inválida ignorada: $erro');
+          debugPrintStack(stackTrace: stackTrace);
+        }
+      }
 
       // Aplica as listas somente após todas as leituras concluírem.
       treinos = treinosCarregados;
@@ -563,9 +369,11 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
             !idsTreinos.contains(item.treinoId) ||
             !idsExercicios.contains(item.exercicioId),
       );
+      erroCarregamento = false;
     } catch (erro, stackTrace) {
-      debugPrint('Erro ao carregar dados do WorkHoly: $erro');
+      debugPrint('Erro ao carregar dados do Moveria: $erro');
       debugPrintStack(stackTrace: stackTrace);
+      erroCarregamento = true;
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -583,7 +391,7 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
         setState(() => carregando = false);
 
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
+          if (mounted && !erroCarregamento) {
             verificarTutorialPrimeiroAcesso();
           }
         });
@@ -600,13 +408,49 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
         sessoesTreino: sessoesTreino.map((sessao) => sessao.toJson()).toList(),
       );
     } catch (erro) {
-      debugPrint('Erro ao salvar dados do WorkHoly: $erro');
+      debugPrint('Erro ao salvar dados do Moveria: $erro');
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Erro ao salvar os dados no aparelho.')),
         );
       }
+      rethrow;
+    }
+  }
+
+  _SnapshotDadosTreino _capturarDadosTreino() {
+    return _SnapshotDadosTreino(
+      treinos: List<Treino>.from(treinos),
+      exercicios: List<Exercicio>.from(exercicios),
+      itensTreino: List<ItemTreino>.from(itensTreino),
+      sessoes: List<SessaoTreino>.from(sessoesTreino),
+      idsExerciciosSelecionados: Set<String>.from(_idsExerciciosSelecionados),
+    );
+  }
+
+  Future<bool> _salvarComRollback(_SnapshotDadosTreino anterior) async {
+    try {
+      await salvarDados();
+      return true;
+    } catch (_) {
+      treinos
+        ..clear()
+        ..addAll(anterior.treinos);
+      exercicios
+        ..clear()
+        ..addAll(anterior.exercicios);
+      itensTreino
+        ..clear()
+        ..addAll(anterior.itensTreino);
+      sessoesTreino
+        ..clear()
+        ..addAll(anterior.sessoes);
+      _idsExerciciosSelecionados
+        ..clear()
+        ..addAll(anterior.idsExerciciosSelecionados);
+      if (mounted) setState(() {});
+      return false;
     }
   }
 
@@ -631,6 +475,7 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
               .toList(),
           onSalvar: (novosItens) => salvarItensDoTreino(treinoId, novosItens),
           onIniciarTreino: () => iniciarSessaoTreino(treinoId),
+          sessoesAnteriores: List<SessaoTreino>.from(sessoesTreino),
         ),
       ),
     );
@@ -638,7 +483,50 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
     if (mounted) setState(() {});
   }
 
-  Future<void> iniciarSessaoTreino(String treinoId) async {
+  Future<void> iniciarSessaoTreino(String treinoId, {String? alunoId}) async {
+    final sessoesEmAndamento = sessoesTreino
+        .where((sessao) => !sessao.finalizada)
+        .toList();
+    final sessaoEmAndamento = sessoesEmAndamento
+        .where((sessao) => sessao.alunoId == alunoId)
+        .firstOrNull;
+    if (sessaoEmAndamento != null) {
+      final retomar = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Treino em andamento'),
+          content: Text(
+            'Você já tem uma sessão de "${sessaoEmAndamento.nomeTreino}" '
+            'em andamento. Deseja retomá-la?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Retomar'),
+            ),
+          ],
+        ),
+      );
+      if (retomar == true && mounted) {
+        await retomarSessaoTreino(sessaoEmAndamento);
+      }
+      return;
+    }
+    if (sessoesEmAndamento.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Finalize ou retome o treino em andamento antes de iniciar outro.',
+          ),
+        ),
+      );
+      return;
+    }
+
     final indiceTreino = treinos.indexWhere((t) => t.id == treinoId);
     if (indiceTreino < 0) return;
 
@@ -676,6 +564,10 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
             repeticoesRealizadas: item.repeticoes,
             cargaKg: item.cargaKg,
             descansoSegundos: item.descansoSegundos,
+            pesoCorporal: item.pesoCorporal,
+            instrucoes: item.instrucoes,
+            metaCargaKg: item.metaCargaKg,
+            metaRepeticoes: item.metaRepeticoes,
             concluida: false,
           ),
         );
@@ -689,18 +581,23 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
       inicio: DateTime.now(),
       fim: null,
       series: series,
+      alunoId: alunoId,
     );
 
+    final anterior = _capturarDadosTreino();
     setState(() => sessoesTreino.add(sessao));
-    await salvarDados();
+    if (!await _salvarComRollback(anterior)) return;
 
     if (!mounted) return;
 
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
-        builder: (_) =>
-            ExecucaoTreinoPage(sessaoInicial: sessao, onSalvar: salvarSessao),
+        builder: (_) => ExecucaoTreinoPage(
+          sessaoInicial: sessao,
+          onSalvar: salvarSessao,
+          cargasMaximasAnteriores: _cargasMaximasAnteriores(sessao),
+        ),
       ),
     );
 
@@ -709,6 +606,7 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
 
   Future<void> salvarSessao(SessaoTreino sessao) async {
     final indice = sessoesTreino.indexWhere((s) => s.id == sessao.id);
+    final sessoesAnteriores = List<SessaoTreino>.from(sessoesTreino);
 
     if (indice < 0) {
       sessoesTreino.add(sessao);
@@ -716,9 +614,83 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
       sessoesTreino[indice] = sessao;
     }
 
-    await salvarDados();
+    try {
+      await salvarDados();
+    } catch (_) {
+      sessoesTreino
+        ..clear()
+        ..addAll(sessoesAnteriores);
+      rethrow;
+    }
 
     if (mounted) setState(() {});
+  }
+
+  Map<String, double> _cargasMaximasAnteriores(SessaoTreino atual) {
+    final cargas = <String, double>{};
+    for (final sessao in sessoesTreino.where(
+      (item) =>
+          item.finalizada &&
+          item.id != atual.id &&
+          item.alunoId == atual.alunoId,
+    )) {
+      for (final serie in sessao.series.where((item) => item.concluida)) {
+        final anterior = cargas[serie.exercicioId] ?? 0;
+        if (serie.cargaKg > anterior) {
+          cargas[serie.exercicioId] = serie.cargaKg;
+        }
+      }
+    }
+    return cargas;
+  }
+
+  Future<void> editarAnotacoes(SessaoTreino sessao) async {
+    final controller = TextEditingController(text: sessao.anotacoes);
+    try {
+      final texto = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Anotações da sessão'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            minLines: 3,
+            maxLines: 8,
+            maxLength: 1000,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              hintText: 'Como foi o treino? Registre observações.',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, controller.text),
+              child: const Text('Salvar'),
+            ),
+          ],
+        ),
+      );
+      if (texto == null || !mounted) return;
+      try {
+        await salvarSessao(sessao.copiar(anotacoes: texto.trim()));
+        if (!mounted) return;
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Anotações salvas.')));
+      } catch (erro) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Não foi possível salvar as anotações: $erro'),
+          ),
+        );
+      }
+    } finally {
+      controller.dispose();
+    }
   }
 
   Future<void> limparHistorico() async {
@@ -755,11 +727,12 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
 
     if (confirmar != true || !mounted) return;
 
+    final anterior = _capturarDadosTreino();
     setState(() {
       sessoesTreino.removeWhere((sessao) => sessao.finalizada);
     });
 
-    await salvarDados();
+    if (!await _salvarComRollback(anterior)) return;
 
     if (!mounted) return;
 
@@ -770,23 +743,24 @@ class _WorkHolyHomeState extends State<WorkHolyHome> {
     );
   }
 
-Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
-  if (sessao.finalizada) return;
+  Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
+    if (sessao.finalizada) return;
 
-  await Navigator.push<void>(
-    context,
-    MaterialPageRoute(
-      builder: (_) => ExecucaoTreinoPage(
-        sessaoInicial: sessao,
-        onSalvar: salvarSessao,
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ExecucaoTreinoPage(
+          sessaoInicial: sessao,
+          onSalvar: salvarSessao,
+          cargasMaximasAnteriores: _cargasMaximasAnteriores(sessao),
+        ),
       ),
-    ),
-  );
+    );
 
-  if (mounted) {
-    setState(() {});
+    if (mounted) {
+      setState(() {});
+    }
   }
-}
 
   Future<void> excluirSessaoDoHistorico(SessaoTreino sessao) async {
     if (!sessao.finalizada) return;
@@ -814,10 +788,11 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
 
     if (confirmar != true || !mounted) return;
 
+    final anterior = _capturarDadosTreino();
     setState(() {
       sessoesTreino.removeWhere((item) => item.id == sessao.id);
     });
-    await salvarDados();
+    if (!await _salvarComRollback(anterior)) return;
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -830,6 +805,7 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
     String treinoId,
     List<ItemTreino> novosItens,
   ) async {
+    final anterior = _capturarDadosTreino();
     itensTreino.removeWhere((item) => item.treinoId == treinoId);
     itensTreino.addAll(novosItens);
 
@@ -840,12 +816,18 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
         id: antigo.id,
         nome: antigo.nome,
         objetivo: antigo.objetivo,
+        grupo: antigo.grupo,
+        favorito: antigo.favorito,
+        diasSemana: antigo.diasSemana,
+        anotacoes: antigo.anotacoes,
         exercicios: novosItens.length,
       );
     }
 
     if (mounted) setState(() {});
-    await salvarDados();
+    if (!await _salvarComRollback(anterior)) {
+      throw StateError('Não foi possível salvar as alterações do treino.');
+    }
   }
 
   Future<void> criarOuEditarTreino([Treino? existente]) async {
@@ -856,6 +838,7 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
 
     if (resultado == null || !mounted) return;
 
+    final anterior = _capturarDadosTreino();
     setState(() {
       if (existente == null) {
         treinos.add(resultado);
@@ -868,7 +851,56 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
       }
     });
 
-    await salvarDados();
+    await _salvarComRollback(anterior);
+  }
+
+  Future<void> alternarFavorito(Treino treino) async {
+    final anterior = _capturarDadosTreino();
+    final indice = treinos.indexWhere((item) => item.id == treino.id);
+    if (indice < 0) return;
+    setState(() {
+      treinos[indice] = treino.copiar(favorito: !treino.favorito);
+    });
+    await _salvarComRollback(anterior);
+  }
+
+  Future<void> duplicarTreino(Treino treino) async {
+    final novoTreinoId = novoId('treino');
+    final novosItens = itensTreino
+        .where((item) => item.treinoId == treino.id)
+        .map(
+          (item) => ItemTreino(
+            id: novoId('item'),
+            treinoId: novoTreinoId,
+            exercicioId: item.exercicioId,
+            series: item.series,
+            repeticoes: item.repeticoes,
+            cargaKg: item.cargaKg,
+            descansoSegundos: item.descansoSegundos,
+            pesoCorporal: item.pesoCorporal,
+            instrucoes: item.instrucoes,
+            metaCargaKg: item.metaCargaKg,
+            metaRepeticoes: item.metaRepeticoes,
+          ),
+        )
+        .toList();
+    final novoTreino = treino.copiar(
+      id: novoTreinoId,
+      nome: '${treino.nome} (cópia)',
+      favorito: false,
+      exercicios: novosItens.length,
+    );
+    final anterior = _capturarDadosTreino();
+    setState(() {
+      treinos.add(novoTreino);
+      itensTreino.addAll(novosItens);
+    });
+    if (!await _salvarComRollback(anterior)) return;
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Cópia de "${treino.nome}" criada.')),
+      );
+    }
   }
 
   Future<void> excluirTreino(Treino treino) async {
@@ -880,12 +912,13 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
 
     if (confirmar != true || !mounted) return;
 
+    final anterior = _capturarDadosTreino();
     setState(() {
       treinos.removeWhere((t) => t.id == treino.id);
       itensTreino.removeWhere((item) => item.treinoId == treino.id);
     });
 
-    await salvarDados();
+    await _salvarComRollback(anterior);
   }
 
   Future<bool> adicionarExercicioPredefinido(
@@ -894,28 +927,32 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
     final nomeNormalizado = predefinido.nome.trim().toLowerCase();
     final grupoNormalizado = predefinido.grupo.trim().toLowerCase();
 
-    final jaExiste = exercicios.any(
-      (exercicio) =>
-          exercicio.nome.trim().toLowerCase() == nomeNormalizado &&
-          exercicio.grupo.trim().toLowerCase() == grupoNormalizado,
-    );
+    final jaExiste = exercicios.any((exercicio) {
+      final nomeExistente = exercicio.nome.trim().toLowerCase();
+      return (nomeExistente == nomeNormalizado ||
+              nomeExistente.startsWith('$nomeNormalizado (')) &&
+          exercicio.grupo.trim().toLowerCase() == grupoNormalizado;
+    });
 
     if (jaExiste) {
       return false;
     }
 
     final novoExercicio = Exercicio(
-      nome: predefinido.nome,
+      nome: predefinido.nomeComNomeOriginal,
       grupo: predefinido.grupo,
       series: predefinido.series,
       repeticoes: predefinido.repeticoes,
     );
 
+    final anterior = _capturarDadosTreino();
     setState(() {
       exercicios.add(novoExercicio);
     });
 
-    await salvarDados();
+    if (!await _salvarComRollback(anterior)) {
+      throw StateError('Não foi possível salvar o exercício.');
+    }
 
     return true;
   }
@@ -928,6 +965,7 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
 
     if (resultado == null || !mounted) return;
 
+    final anterior = _capturarDadosTreino();
     setState(() {
       if (existente == null) {
         exercicios.add(resultado);
@@ -940,7 +978,7 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
       }
     });
 
-    await salvarDados();
+    await _salvarComRollback(anterior);
   }
 
   Future<void> excluirExercicio(Exercicio exercicio) async {
@@ -981,13 +1019,14 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
 
     if (confirmar != true || !mounted) return;
 
+    final anterior = _capturarDadosTreino();
     setState(() {
       exercicios.removeWhere((exercicio) => idsValidos.contains(exercicio.id));
       itensTreino.removeWhere((item) => idsValidos.contains(item.exercicioId));
       _idsExerciciosSelecionados.removeAll(idsValidos);
     });
 
-    await salvarDados();
+    if (!await _salvarComRollback(anterior)) return;
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1101,6 +1140,11 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
         icone: Icons.history_outlined,
         iconeSelecionado: Icons.history,
       ),
+      _DestinoNavegacao(
+        rotulo: 'Alunos',
+        icone: Icons.groups_outlined,
+        iconeSelecionado: Icons.groups,
+      ),
     ];
 
     final tema = Theme.of(context);
@@ -1192,6 +1236,15 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
       construirPaginaExercicios(),
       CorridaPage(onHistoricoAtualizado: carregarCorridasDoPainel),
       construirPaginaHistorico(),
+      AlunosPage(
+        treinos: treinos,
+        exercicios: exercicios,
+        itensTreino: itensTreino,
+        sessoes: sessoesTreino,
+        onIniciarTreino: (treinoId, alunoId) =>
+            iniciarSessaoTreino(treinoId, alunoId: alunoId),
+        onDadosAlterados: carregarDados,
+      ),
     ];
 
     return Scaffold(
@@ -1200,7 +1253,7 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
           children: [
             Icon(Icons.fitness_center, color: verde),
             SizedBox(width: 10),
-            Text('WorkHoly', style: TextStyle(fontWeight: FontWeight.bold)),
+            Text('Moveria', style: TextStyle(fontWeight: FontWeight.bold)),
           ],
         ),
         actions: [
@@ -1210,8 +1263,11 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
             onPressed: () {
               Navigator.of(context).push(
                 MaterialPageRoute<void>(
-                  builder: (_) =>
-                      ConfiguracoesPage(aparencia: widget.aparencia),
+                  builder: (_) => ConfiguracoesPage(
+                    aparencia: widget.aparencia,
+                    onBackupRestaurado: carregarDados,
+                    onMetaAtualizada: _carregarMetaTreinosSemana,
+                  ),
                 ),
               );
             },
@@ -1221,6 +1277,37 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
       ),
       body: carregando
           ? const Center(child: CircularProgressIndicator(color: verde))
+          : erroCarregamento
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.storage_outlined, size: 48, color: verde),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Não foi possível carregar os dados salvos. '
+                      'Para evitar sobrescrever seu histórico, as alterações '
+                      'estão temporariamente bloqueadas.',
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          carregando = true;
+                          erroCarregamento = false;
+                        });
+                        carregarDados();
+                      },
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Tentar novamente'),
+                    ),
+                  ],
+                ),
+              ),
+            )
           : SafeArea(
               child: IndexedStack(index: abaSelecionada, children: paginas),
             ),
@@ -1266,6 +1353,11 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
       return !atividade.inicio.isBefore(inicioSemana) &&
           atividade.inicio.isBefore(inicioSemana.add(const Duration(days: 7)));
     }).toList();
+    final treinosConcluidosSemana = sessoesFinalizadas.where((sessao) {
+      final fim = sessao.fim!;
+      return !fim.isBefore(inicioSemana) &&
+          fim.isBefore(inicioSemana.add(const Duration(days: 7)));
+    }).length;
 
     final duracaoTotal = atividadesFinalizadas.fold<int>(
       0,
@@ -1328,9 +1420,11 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
           style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 6),
-        const Text(
+        Text(
           'Acompanhe sua rotina e sua evolução.',
-          style: TextStyle(color: textoSecundario),
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
         const SizedBox(height: 20),
 
@@ -1365,6 +1459,44 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
           ],
         ),
 
+        const SizedBox(height: 16),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.flag_outlined, color: verde),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Meta semanal de musculação',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    Text(
+                      '$treinosConcluidosSemana/$_metaTreinosSemana',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.primary,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                LinearProgressIndicator(
+                  value: (treinosConcluidosSemana / _metaTreinosSemana)
+                      .clamp(0.0, 1.0)
+                      .toDouble(),
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ],
+            ),
+          ),
+        ),
+
         const SizedBox(height: 24),
 
         _cartaoGrafico(
@@ -1384,15 +1516,17 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
         const SizedBox(height: 16),
 
         Card(
-          color: superficie,
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'Tempo total de treino',
-                  style: TextStyle(color: textoSecundario, fontSize: 14),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontSize: 14,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -1405,7 +1539,9 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
                 const SizedBox(height: 4),
                 Text(
                   '${atividadesFinalizadas.length} atividades finalizadas',
-                  style: const TextStyle(color: textoSecundario),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
@@ -1415,7 +1551,6 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
         const SizedBox(height: 16),
 
         Card(
-          color: superficie,
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -1427,10 +1562,12 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
                 ),
                 const SizedBox(height: 12),
                 if (ultimaAtividade == null)
-                  const Text(
+                  Text(
                     'Você ainda não concluiu uma atividade. '
                     'Seu histórico aparecerá aqui.',
-                    style: TextStyle(color: textoSecundario),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   )
                 else ...[
                   Text(
@@ -1445,7 +1582,9 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
                     '${ultimaAtividade.inicio.day.toString().padLeft(2, '0')}/'
                     '${ultimaAtividade.inicio.month.toString().padLeft(2, '0')}/'
                     '${ultimaAtividade.inicio.year}',
-                    style: const TextStyle(color: textoSecundario),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   Text(
@@ -1453,7 +1592,9 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
                         ? '${((ultimaAtividade.distanciaMetros ?? 0) / 1000).toStringAsFixed(2).replaceAll('.', ',')} km'
                               ' • ${_formatarDuracao(ultimaAtividade.duracaoSegundos)}'
                         : '${ultimaAtividade.seriesConcluidas} séries concluídas',
-                    style: const TextStyle(color: textoSecundario),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ],
@@ -1467,9 +1608,11 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
         const SizedBox(height: 10),
 
         if (treinos.isEmpty)
-          const Text(
+          Text(
             'Nenhum treino cadastrado. Crie seu primeiro treino.',
-            style: TextStyle(color: textoSecundario),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
 
         ...treinos.map((treino) => cartaoTreino(treino)),
@@ -1507,7 +1650,6 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
         : valores.reduce((a, b) => a > b ? a : b);
 
     return Card(
-      color: superficie,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -1536,27 +1678,30 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
                         children: [
                           Text(
                             '$valor',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 11,
-                              color: textoSecundario,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
                             ),
                           ),
                           const SizedBox(height: 5),
                           Container(
                             height: altura,
                             decoration: BoxDecoration(
-                              color: verde.withValues(
-                                alpha: valor == 0 ? 0.20 : 0.90,
-                              ),
+                              color: Theme.of(context).colorScheme.primary
+                                  .withValues(alpha: valor == 0 ? 0.20 : 0.90),
                               borderRadius: BorderRadius.circular(5),
                             ),
                           ),
                           const SizedBox(height: 8),
                           Text(
                             rotulos[indice],
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 10,
-                              color: textoSecundario,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
                             ),
                           ),
                         ],
@@ -1568,9 +1713,12 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
             ),
             if (maximo == 0) ...[
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 'Ainda não há sessões concluídas neste período.',
-                style: TextStyle(fontSize: 12, color: textoSecundario),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
           ],
@@ -1583,7 +1731,7 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: superficie,
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
@@ -1605,7 +1753,10 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
             titulo,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 12, color: textoSecundario),
+            style: TextStyle(
+              fontSize: 12,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         ],
       ),
@@ -1620,7 +1771,19 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
   }
 
   Widget cartaoTreino(Treino treino) {
-    final quantidade = quantidadeExercicios(treino.id);
+    final itensDoTreino = itensTreino
+        .where((item) => item.treinoId == treino.id)
+        .toList();
+    final sessoesDoTreino =
+        sessoesTreino
+            .where(
+              (sessao) => sessao.treinoId == treino.id && sessao.finalizada,
+            )
+            .toList()
+          ..sort((a, b) => b.inicio.compareTo(a.inicio));
+    final duracaoEstimada = _duracaoEstimada(itensDoTreino);
+    final ultimaSessao = sessoesDoTreino.firstOrNull;
+    final cores = Theme.of(context).colorScheme;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
@@ -1629,62 +1792,134 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
         borderRadius: BorderRadius.circular(14),
         onTap: () => abrirDetalhesTreino(treino.id),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          padding: const EdgeInsets.all(14),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
                 width: 46,
                 height: 46,
                 decoration: BoxDecoration(
-                  color: verde.withValues(alpha: 0.12),
+                  color: cores.primaryContainer,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.fitness_center, color: verde),
+                child: Icon(
+                  Icons.fitness_center,
+                  color: cores.onPrimaryContainer,
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            treino.nome,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: treino.favorito
+                              ? 'Remover dos favoritos'
+                              : 'Adicionar aos favoritos',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => alternarFavorito(treino),
+                          icon: Icon(
+                            treino.favorito ? Icons.star : Icons.star_border,
+                            color: treino.favorito ? Colors.amber : null,
+                          ),
+                        ),
+                        PopupMenuButton<String>(
+                          tooltip: 'Opções do treino',
+                          onSelected: (opcao) {
+                            switch (opcao) {
+                              case 'abrir':
+                                abrirDetalhesTreino(treino.id);
+                              case 'editar':
+                                criarOuEditarTreino(treino);
+                              case 'duplicar':
+                                duplicarTreino(treino);
+                              case 'excluir':
+                                excluirTreino(treino);
+                            }
+                          },
+                          itemBuilder: (_) => const [
+                            PopupMenuItem(
+                              value: 'abrir',
+                              child: Text('Montar treino'),
+                            ),
+                            PopupMenuItem(
+                              value: 'editar',
+                              child: Text('Editar detalhes'),
+                            ),
+                            PopupMenuItem(
+                              value: 'duplicar',
+                              child: Text('Duplicar treino'),
+                            ),
+                            PopupMenuItem(
+                              value: 'excluir',
+                              child: Text('Excluir treino'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    if (treino.objetivo.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        treino.objetivo,
+                        style: TextStyle(color: cores.onSurfaceVariant),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        if (treino.grupo.trim().isNotEmpty)
+                          Chip(
+                            visualDensity: VisualDensity.compact,
+                            label: Text(treino.grupo),
+                          ),
+                        if (treino.diasSemana.isNotEmpty)
+                          Chip(
+                            visualDensity: VisualDensity.compact,
+                            avatar: const Icon(Icons.event_repeat, size: 16),
+                            label: Text(
+                              treino.diasSemana
+                                  .map((dia) => _diasTreino[dia - 1])
+                                  .join(', '),
+                            ),
+                          ),
+                      ],
+                    ),
                     Text(
-                      treino.nome,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
+                      '${itensDoTreino.length} ${itensDoTreino.length == 1 ? 'exercício' : 'exercícios'}'
+                      '${duracaoEstimada == null ? '' : ' • Cerca de $duracaoEstimada min'}',
+                      style: TextStyle(
+                        color: cores.primary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const SizedBox(height: 3),
+                    const SizedBox(height: 4),
                     Text(
-                      treino.objetivo.isEmpty
-                          ? 'Sem objetivo definido'
-                          : treino.objetivo,
-                      style: const TextStyle(color: textoSecundario),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      '$quantidade ${quantidade == 1 ? 'exercício associado' : 'exercícios associados'}',
-                      style: const TextStyle(color: verde, fontSize: 12),
+                      ultimaSessao == null
+                          ? 'Ainda não realizado'
+                          : 'Último: ${_formatarDataTreino(ultimaSessao.fim!)}',
+                      style: TextStyle(
+                        color: cores.onSurfaceVariant,
+                        fontSize: 12,
+                      ),
                     ),
                   ],
                 ),
-              ),
-              IconButton(
-                tooltip: 'Editar treino',
-                onPressed: () => criarOuEditarTreino(treino),
-                icon: const Icon(Icons.edit_outlined),
-              ),
-              PopupMenuButton<String>(
-                onSelected: (opcao) {
-                  if (opcao == 'excluir') excluirTreino(treino);
-                  if (opcao == 'abrir') abrirDetalhesTreino(treino.id);
-                },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'abrir', child: Text('Montar treino')),
-                  PopupMenuItem(
-                    value: 'excluir',
-                    child: Text('Excluir treino'),
-                  ),
-                ],
               ),
             ],
           ),
@@ -1693,7 +1928,106 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
     );
   }
 
+  int? _duracaoEstimada(List<ItemTreino> itensDoTreino) {
+    if (itensDoTreino.isEmpty) return null;
+    final segundos = itensDoTreino.fold<int>(0, (total, item) {
+      final tempoExecucao = item.series * item.repeticoes * 3;
+      final descansos =
+          (item.series - 1).clamp(0, item.series) * item.descansoSegundos;
+      return total + tempoExecucao + descansos + 60;
+    });
+    return (segundos / 60).ceil();
+  }
+
+  List<Treino> get _treinosFiltrados {
+    final termo = _buscaTreinosController.text.trim().toLowerCase();
+    return treinos.where((treino) {
+      final correspondeBusca =
+          termo.isEmpty ||
+          treino.nome.toLowerCase().contains(termo) ||
+          treino.objetivo.toLowerCase().contains(termo) ||
+          treino.grupo.toLowerCase().contains(termo);
+      final correspondeGrupo =
+          _filtroGrupoTreinos.isEmpty || treino.grupo == _filtroGrupoTreinos;
+      final correspondeDia =
+          _filtroDiaTreinos == null ||
+          treino.diasSemana.contains(_filtroDiaTreinos);
+      return correspondeBusca &&
+          correspondeGrupo &&
+          correspondeDia &&
+          (!_somenteFavoritos || treino.favorito);
+    }).toList()..sort((a, b) {
+      if (a.favorito != b.favorito) return a.favorito ? -1 : 1;
+      return a.nome.toLowerCase().compareTo(b.nome.toLowerCase());
+    });
+  }
+
+  Widget _planejamentoSemanal() {
+    final planejados = treinos.where((treino) => treino.diasSemana.isNotEmpty);
+    if (planejados.isEmpty) return const SizedBox.shrink();
+    final nomesDoDia = _filtroDiaTreinos == null
+        ? const <String>[]
+        : planejados
+              .where((treino) => treino.diasSemana.contains(_filtroDiaTreinos))
+              .map((treino) => treino.nome)
+              .toList();
+    final cores = Theme.of(context).colorScheme;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Planejamento semanal',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              children: List.generate(_diasTreino.length, (indice) {
+                final dia = indice + 1;
+                final quantidade = planejados
+                    .where((treino) => treino.diasSemana.contains(dia))
+                    .length;
+                return FilterChip(
+                  label: Text('${_diasTreino[indice]} $quantidade'),
+                  selected: _filtroDiaTreinos == dia,
+                  onSelected: quantidade == 0
+                      ? null
+                      : (_) => setState(() {
+                          _filtroDiaTreinos = _filtroDiaTreinos == dia
+                              ? null
+                              : dia;
+                          _filtroGrupoTreinos = '';
+                        }),
+                );
+              }),
+            ),
+            if (nomesDoDia.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Na rotina: ${nomesDoDia.join(', ')}',
+                style: TextStyle(color: cores.onSurfaceVariant),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget construirPaginaTreinos() {
+    final filtrados = _treinosFiltrados;
+    final grupos =
+        treinos
+            .map((treino) => treino.grupo.trim())
+            .where((grupo) => grupo.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+
     return ListView(
       padding: const EdgeInsets.all(18),
       children: [
@@ -1709,23 +2043,86 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
               onPressed: () => criarOuEditarTreino(),
               icon: const Icon(Icons.add),
               style: IconButton.styleFrom(
-                backgroundColor: verde,
-                foregroundColor: Colors.black,
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
               ),
             ),
           ],
         ),
         const SizedBox(height: 12),
+        TextField(
+          controller: _buscaTreinosController,
+          onChanged: (_) => setState(() {}),
+          decoration: InputDecoration(
+            prefixIcon: const Icon(Icons.search),
+            hintText: 'Buscar por treino, objetivo ou grupo',
+            suffixIcon: _buscaTreinosController.text.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: 'Limpar busca',
+                    onPressed: () {
+                      _buscaTreinosController.clear();
+                      setState(() {});
+                    },
+                    icon: const Icon(Icons.close),
+                  ),
+            border: const OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          children: [
+            FilterChip(
+              label: const Text('Favoritos'),
+              avatar: const Icon(Icons.star, size: 18),
+              selected: _somenteFavoritos,
+              onSelected: (selecionado) =>
+                  setState(() => _somenteFavoritos = selecionado),
+            ),
+            ChoiceChip(
+              label: const Text('Todos os grupos'),
+              selected: _filtroGrupoTreinos.isEmpty,
+              onSelected: (_) => setState(() => _filtroGrupoTreinos = ''),
+            ),
+            ...grupos.map(
+              (grupo) => ChoiceChip(
+                label: Text(grupo),
+                selected: _filtroGrupoTreinos == grupo,
+                onSelected: (_) => setState(
+                  () => _filtroGrupoTreinos = _filtroGrupoTreinos == grupo
+                      ? ''
+                      : grupo,
+                ),
+              ),
+            ),
+          ],
+        ),
+        _planejamentoSemanal(),
+        const SizedBox(height: 8),
         if (treinos.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 30),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 30),
             child: Text(
               'Você ainda não cadastrou treinos.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: textoSecundario),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ),
-        ...treinos.map((treino) => cartaoTreino(treino)),
+        if (treinos.isNotEmpty && filtrados.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 28),
+            child: Text(
+              'Nenhum treino corresponde aos filtros selecionados.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ...filtrados.map((treino) => cartaoTreino(treino)),
       ],
     );
   }
@@ -1822,8 +2219,10 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
                       onPressed: () => criarOuEditarExercicio(),
                       icon: const Icon(Icons.add),
                       style: IconButton.styleFrom(
-                        backgroundColor: verde,
-                        foregroundColor: Colors.black,
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        foregroundColor: Theme.of(context)
+                            .colorScheme
+                            .onPrimary,
                       ),
                     ),
                   ],
@@ -1834,7 +2233,9 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
                 emModoSelecaoExercicios
                     ? 'Toque nos exercícios para selecionar ou desmarcar.'
                     : 'Cadastre exercícios para utilizá-los na montagem dos treinos.',
-                style: const TextStyle(color: textoSecundario),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 16),
               TextField(
@@ -1862,7 +2263,10 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
               Text(
                 '${filtrados.length} ${filtrados.length == 1 ? 'exercício encontrado' : 'exercícios encontrados'}'
                 '${emModoSelecaoExercicios ? ' • toque longo para continuar a seleção' : ' • toque longo para selecionar vários'}',
-                style: const TextStyle(color: textoSecundario, fontSize: 12),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontSize: 12,
+                ),
               ),
               const SizedBox(height: 10),
             ],
@@ -1897,17 +2301,39 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
                     value: selecionado,
                     onChanged: (_) => alternarSelecaoExercicio(exercicio),
                   )
-                : const CircleAvatar(
-                    backgroundColor: superficie,
-                    child: Icon(Icons.fitness_center, color: verde),
+                : CircleAvatar(
+                    backgroundColor: Theme.of(context)
+                        .colorScheme
+                        .surfaceContainerHighest,
+                    child: Icon(
+                      Icons.fitness_center,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
                   ),
             title: Text(
               exercicio.nome,
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
-            subtitle: Text(
-              '${exercicio.grupo} • ${exercicio.series} séries • ${exercicio.repeticoes} repetições',
-              style: const TextStyle(color: textoSecundario),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${exercicio.grupo} • ${exercicio.series} séries • ${exercicio.repeticoes} repetições',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                if (exercicio.anotacoes.isNotEmpty)
+                  Text(
+                    exercicio.anotacoes,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontSize: 12,
+                    ),
+                  ),
+              ],
             ),
             trailing: emModoSelecaoExercicios
                 ? null
@@ -1934,6 +2360,7 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
   Widget construirPaginaHistorico() {
     final ordenadas = List<SessaoTreino>.from(sessoesTreino)
       ..sort((a, b) => b.inicio.compareTo(a.inicio));
+    final cores = Theme.of(context).colorScheme;
 
     String dataFormatada(DateTime data) {
       final d = data.toLocal();
@@ -1966,22 +2393,22 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
         ),
         const SizedBox(height: 12),
         if (ordenadas.isEmpty)
-          const Card(
+          Card(
             child: Padding(
-              padding: EdgeInsets.all(22),
+              padding: const EdgeInsets.all(22),
               child: Column(
                 children: [
-                  Icon(Icons.history, size: 44, color: verde),
-                  SizedBox(height: 12),
-                  Text(
+                  Icon(Icons.history, size: 44, color: cores.primary),
+                  const SizedBox(height: 12),
+                  const Text(
                     'Nenhuma sessão registrada',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   Text(
                     'Inicie um treino para registrar sua primeira sessão.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: textoSecundario),
+                    style: TextStyle(color: cores.onSurfaceVariant),
                   ),
                 ],
               ),
@@ -2017,17 +2444,29 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
                           IconButton(
                             tooltip: 'Retomar treino',
                             onPressed: () => retomarSessaoTreino(sessao),
-                            icon: const Icon(
+                            icon: Icon(
                               Icons.play_circle_outline,
-                              color: verde,
+                              color: cores.primary,
                             ),
                           ),
+                        IconButton(
+                          tooltip: 'Anotações da sessão',
+                          onPressed: () => editarAnotacoes(sessao),
+                          icon: Icon(
+                            sessao.anotacoes.isEmpty
+                                ? Icons.note_add_outlined
+                                : Icons.sticky_note_2_outlined,
+                          ),
+                        ),
                         if (sessao.finalizada &&
                             treinos.any((t) => t.id == sessao.treinoId))
                           IconButton(
                             tooltip: 'Refazer treino',
                             onPressed: () {
-                              iniciarSessaoTreino(sessao.treinoId);
+                              iniciarSessaoTreino(
+                                sessao.treinoId,
+                                alunoId: sessao.alunoId,
+                              );
                             },
                             icon: const Icon(Icons.replay, color: verde),
                           ),
@@ -2045,20 +2484,37 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
                     const SizedBox(height: 8),
                     Text(
                       dataFormatada(sessao.inicio),
-                      style: const TextStyle(color: textoSecundario),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                     const SizedBox(height: 6),
                     Text(
                       '${sessao.finalizada ? "Finalizado" : "Em andamento"}'
                       ' • $feitas/$total séries'
                       ' • $minutos min',
-                      style: const TextStyle(color: textoSecundario),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
+                    if (sessao.anotacoes.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        sessao.anotacoes,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 10),
                     LinearProgressIndicator(
                       value: progresso.clamp(0.0, 1.0),
-                      color: verde,
-                      backgroundColor: Colors.white12,
+                      color: Theme.of(context).colorScheme.primary,
+                      backgroundColor: Theme.of(context)
+                          .colorScheme
+                          .surfaceContainerHighest,
                     ),
                   ],
                 ),
@@ -2071,9 +2527,16 @@ Future<void> retomarSessaoTreino(SessaoTreino sessao) async {
 }
 
 class ConfiguracoesPage extends StatelessWidget {
-  const ConfiguracoesPage({super.key, required this.aparencia});
+  const ConfiguracoesPage({
+    super.key,
+    required this.aparencia,
+    required this.onBackupRestaurado,
+    required this.onMetaAtualizada,
+  });
 
   final WorkHolyAparencia aparencia;
+  final Future<void> Function() onBackupRestaurado;
+  final Future<void> Function() onMetaAtualizada;
 
   void mostrarEmBreve(BuildContext context, String recurso) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -2101,7 +2564,7 @@ class ConfiguracoesPage extends StatelessWidget {
   void mostrarSobre(BuildContext context) {
     Navigator.of(
       context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const SobreWorkHolyPage()));
+    ).push(MaterialPageRoute<void>(builder: (_) => const SobreMoveriaPage()));
   }
 
   @override
@@ -2116,16 +2579,18 @@ class ConfiguracoesPage extends StatelessWidget {
             style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
-          const Text(
-            'Gerencie as preferências do WorkHoly Mobile.',
-            style: TextStyle(color: textoSecundario),
+          Text(
+            'Gerencie as preferências do Moveria.',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
           const SizedBox(height: 24),
 
-          const Text(
+          Text(
             'PREFERÊNCIAS',
             style: TextStyle(
-              color: verde,
+              color: Theme.of(context).colorScheme.primary,
               fontSize: 12,
               fontWeight: FontWeight.bold,
               letterSpacing: 1.2,
@@ -2177,15 +2642,51 @@ class ConfiguracoesPage extends StatelessWidget {
                     );
                   },
                 ),
+                const Divider(height: 1, indent: 16, endIndent: 16),
+                ListTile(
+                  leading: const Icon(Icons.scale_outlined, color: verde),
+                  title: const Text('Unidade de carga'),
+                  subtitle: const Text('Os valores são armazenados em kg'),
+                  trailing: DropdownButton<UnidadeCarga>(
+                    value: PreferenciaUnidadeCarga.instancia.unidade,
+                    items: const [
+                      DropdownMenuItem(
+                        value: UnidadeCarga.kg,
+                        child: Text('kg'),
+                      ),
+                      DropdownMenuItem(
+                        value: UnidadeCarga.lb,
+                        child: Text('lb'),
+                      ),
+                    ],
+                    onChanged: (unidade) async {
+                      if (unidade == null) return;
+                      try {
+                        await PreferenciaUnidadeCarga.instancia.definir(
+                          unidade,
+                        );
+                      } catch (erro) {
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Não foi possível salvar a unidade: $erro',
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ),
               ],
             ),
           ),
 
           const SizedBox(height: 24),
-          const Text(
+          Text(
             'APLICATIVO',
             style: TextStyle(
-              color: verde,
+              color: Theme.of(context).colorScheme.primary,
               fontSize: 12,
               fontWeight: FontWeight.bold,
               letterSpacing: 1.2,
@@ -2196,6 +2697,42 @@ class ConfiguracoesPage extends StatelessWidget {
           Card(
             child: Column(
               children: [
+                ListTile(
+                  leading: const Icon(Icons.flag_outlined, color: verde),
+                  title: const Text('Metas e lembretes'),
+                  subtitle: const Text(
+                    'Objetivo semanal e notificação recorrente',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.of(context)
+                        .push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const MetasLembretesPage(),
+                          ),
+                        )
+                        .then((_) => onMetaAtualizada());
+                  },
+                ),
+                const Divider(height: 1, indent: 16, endIndent: 16),
+                ListTile(
+                  leading: const Icon(Icons.backup_outlined, color: verde),
+                  title: const Text('Backup e exportação'),
+                  subtitle: const Text(
+                    'Salvar no Google Drive, exportar ou restaurar',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => BackupTreinoPage(
+                          onBackupRestaurado: onBackupRestaurado,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                const Divider(height: 1, indent: 16, endIndent: 16),
                 ListTile(
                   leading: const Icon(Icons.school_outlined, color: verde),
                   title: const Text('Ver tutorial novamente'),
@@ -2208,7 +2745,7 @@ class ConfiguracoesPage extends StatelessWidget {
                 const Divider(height: 1, indent: 16, endIndent: 16),
                 ListTile(
                   leading: const Icon(Icons.info_outline, color: verde),
-                  title: const Text('Sobre o WorkHoly'),
+                  title: const Text('Sobre o Moveria'),
                   subtitle: const Text('Informações e versão do aplicativo'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => mostrarSobre(context),
@@ -2222,17 +2759,17 @@ class ConfiguracoesPage extends StatelessWidget {
   }
 }
 
-class SobreWorkHolyPage extends StatelessWidget {
-  const SobreWorkHolyPage({super.key});
+class SobreMoveriaPage extends StatelessWidget {
+  const SobreMoveriaPage({super.key});
 
   static const String direitosAutorais =
       '© 2026 Murilo da Silva Machado. Todos os direitos reservados.';
 
   static const String termosDeUso = '''
-TERMOS DE USO — WORKHOLY MOBILE
+TERMOS DE USO — MOVERIA
 
 1. FINALIDADE
-O WorkHoly é um aplicativo destinado à organização e ao acompanhamento de
+O Moveria é um aplicativo destinado à organização e ao acompanhamento de
 treinamentos físicos.
 
 2. PROPRIEDADE INTELECTUAL
@@ -2258,7 +2795,7 @@ Estes termos poderão ser revisados conforme a evolução do aplicativo.
 ''';
 
   static const String politicaPrivacidade = '''
-POLÍTICA DE PRIVACIDADE — WORKHOLY MOBILE
+POLÍTICA DE PRIVACIDADE — MOVERIA
 
 1. DADOS
 O aplicativo pode tratar dados de conta, autenticação e informações inseridas
@@ -2297,7 +2834,7 @@ pelo responsável pelo aplicativo antes da distribuição pública.
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Sobre o WorkHoly')),
+      appBar: AppBar(title: const Text('Sobre o Moveria')),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
@@ -2310,7 +2847,7 @@ pelo responsável pelo aplicativo antes da distribuição pública.
           ),
           const SizedBox(height: 16),
           Text(
-            'WorkHoly Mobile',
+            'Moveria',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.headlineSmall
                 ?.copyWith(fontWeight: FontWeight.bold),
@@ -2327,10 +2864,10 @@ pelo responsável pelo aplicativo antes da distribuição pública.
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'DESENVOLVEDOR',
                     style: TextStyle(
-                      color: verde,
+                      color: Theme.of(context).colorScheme.primary,
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 1.2,
@@ -2344,19 +2881,22 @@ pelo responsável pelo aplicativo antes da distribuição pública.
                   const SizedBox(height: 12),
                   const Text('Versão 1.0.0'),
                   const SizedBox(height: 12),
-                  const Text(
+                  Text(
                     direitosAutorais,
-                    style: TextStyle(color: textoSecundario, height: 1.5),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      height: 1.5,
+                    ),
                   ),
                 ],
               ),
             ),
           ),
           const SizedBox(height: 20),
-          const Text(
+          Text(
             'INFORMAÇÕES LEGAIS',
             style: TextStyle(
-              color: verde,
+              color: Theme.of(context).colorScheme.primary,
               fontSize: 12,
               fontWeight: FontWeight.bold,
               letterSpacing: 1.2,
@@ -2392,11 +2932,14 @@ pelo responsável pelo aplicativo antes da distribuição pública.
             ),
           ),
           const SizedBox(height: 20),
-          const Text(
+          Text(
             'O uso e a distribuição do aplicativo estão sujeitos à legislação '
             'aplicável e às licenças dos componentes utilizados.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: textoSecundario, fontSize: 12),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 12,
+            ),
           ),
         ],
       ),
@@ -2443,6 +2986,10 @@ class FormularioTreinoDialog extends StatefulWidget {
 class _FormularioTreinoDialogState extends State<FormularioTreinoDialog> {
   late final TextEditingController nomeController;
   late final TextEditingController objetivoController;
+  late final TextEditingController grupoController;
+  late final TextEditingController anotacoesController;
+  late Set<int> diasSemana;
+  late bool favorito;
 
   @override
   void initState() {
@@ -2451,12 +2998,22 @@ class _FormularioTreinoDialogState extends State<FormularioTreinoDialog> {
     objetivoController = TextEditingController(
       text: widget.existente?.objetivo ?? '',
     );
+    grupoController = TextEditingController(
+      text: widget.existente?.grupo ?? '',
+    );
+    anotacoesController = TextEditingController(
+      text: widget.existente?.anotacoes ?? '',
+    );
+    diasSemana = {...?widget.existente?.diasSemana};
+    favorito = widget.existente?.favorito ?? false;
   }
 
   @override
   void dispose() {
     nomeController.dispose();
     objetivoController.dispose();
+    grupoController.dispose();
+    anotacoesController.dispose();
     super.dispose();
   }
 
@@ -2478,6 +3035,10 @@ class _FormularioTreinoDialogState extends State<FormularioTreinoDialog> {
         id: existente?.id,
         nome: nome,
         objetivo: objetivo,
+        grupo: grupoController.text.trim(),
+        favorito: favorito,
+        diasSemana: diasSemana.toList(),
+        anotacoes: anotacoesController.text.trim(),
         exercicios: existente?.exercicios ?? 0,
       ),
     );
@@ -2511,6 +3072,59 @@ class _FormularioTreinoDialogState extends State<FormularioTreinoDialog> {
                 hintText: 'Ex.: Peito e tríceps',
               ),
             ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: grupoController,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Grupo ou divisão',
+                hintText: 'Ex.: A, Superior, Força',
+                helperText: 'Use o mesmo nome para agrupar treinos.',
+              ),
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Dias planejados (opcional)',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 4,
+              children: List.generate(_diasTreino.length, (indice) {
+                final dia = indice + 1;
+                return FilterChip(
+                  label: Text(_diasTreino[indice]),
+                  selected: diasSemana.contains(dia),
+                  onSelected: (selecionado) => setState(() {
+                    if (selecionado) {
+                      diasSemana.add(dia);
+                    } else {
+                      diasSemana.remove(dia);
+                    }
+                  }),
+                );
+              }),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Marcar como favorito'),
+              value: favorito,
+              onChanged: (valor) => setState(() => favorito = valor),
+            ),
+            TextField(
+              controller: anotacoesController,
+              textCapitalization: TextCapitalization.sentences,
+              minLines: 2,
+              maxLines: 4,
+              maxLength: 1000,
+              decoration: const InputDecoration(
+                labelText: 'Anotações do treino',
+                hintText: 'Orientações gerais para esta rotina',
+              ),
+            ),
           ],
         ),
       ),
@@ -2540,6 +3154,7 @@ class _FormularioExercicioDialogState extends State<FormularioExercicioDialog> {
   late final TextEditingController grupoController;
   late final TextEditingController seriesController;
   late final TextEditingController repeticoesController;
+  late final TextEditingController anotacoesController;
 
   @override
   void initState() {
@@ -2553,6 +3168,9 @@ class _FormularioExercicioDialogState extends State<FormularioExercicioDialog> {
     repeticoesController = TextEditingController(
       text: '${exercicio?.repeticoes ?? 12}',
     );
+    anotacoesController = TextEditingController(
+      text: exercicio?.anotacoes ?? '',
+    );
   }
 
   @override
@@ -2561,6 +3179,7 @@ class _FormularioExercicioDialogState extends State<FormularioExercicioDialog> {
     grupoController.dispose();
     seriesController.dispose();
     repeticoesController.dispose();
+    anotacoesController.dispose();
     super.dispose();
   }
 
@@ -2593,6 +3212,7 @@ class _FormularioExercicioDialogState extends State<FormularioExercicioDialog> {
         grupo: grupo,
         series: series,
         repeticoes: repeticoes,
+        anotacoes: anotacoesController.text.trim(),
       ),
     );
   }
@@ -2642,6 +3262,18 @@ class _FormularioExercicioDialogState extends State<FormularioExercicioDialog> {
                 ),
               ],
             ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: anotacoesController,
+              textCapitalization: TextCapitalization.sentences,
+              minLines: 2,
+              maxLines: 4,
+              maxLength: 500,
+              decoration: const InputDecoration(
+                labelText: 'Anotações do exercício',
+                hintText: 'Dicas de execução ou observações pessoais',
+              ),
+            ),
           ],
         ),
       ),
@@ -2664,6 +3296,7 @@ class DetalheTreinoPage extends StatefulWidget {
   final Treino treino;
   final List<Exercicio> exerciciosDisponiveis;
   final List<ItemTreino> itensIniciais;
+  final List<SessaoTreino> sessoesAnteriores;
   final Future<void> Function(List<ItemTreino>) onSalvar;
   final Future<void> Function() onIniciarTreino;
 
@@ -2672,6 +3305,7 @@ class DetalheTreinoPage extends StatefulWidget {
     required this.treino,
     required this.exerciciosDisponiveis,
     required this.itensIniciais,
+    this.sessoesAnteriores = const [],
     required this.onSalvar,
     required this.onIniciarTreino,
   });
@@ -2682,6 +3316,7 @@ class DetalheTreinoPage extends StatefulWidget {
 
 class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
   late List<ItemTreino> itens;
+  late List<ItemTreino> _itensSalvos;
   bool salvando = false;
 
   static const String _chaveDescanso = 'workholy_pref_treino_descanso_v1';
@@ -2698,6 +3333,7 @@ class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
     super.initState();
 
     itens = List<ItemTreino>.from(widget.itensIniciais);
+    _itensSalvos = List<ItemTreino>.from(widget.itensIniciais);
 
     _carregarDescansoPreferido();
   }
@@ -2747,6 +3383,175 @@ class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
     return null;
   }
 
+  String _resumoMeta(ItemTreino item) {
+    final partes = <String>[];
+    if (item.metaCargaKg != null) {
+      partes.add(PreferenciaUnidadeCarga.instancia.formatar(item.metaCargaKg!));
+    }
+    if (item.metaRepeticoes != null) {
+      partes.add('${item.metaRepeticoes} repetições');
+    }
+    return partes.join(' • ');
+  }
+
+  String _resumoUltimaExecucao(ItemTreino item) {
+    final sessoes =
+        widget.sessoesAnteriores
+            .where(
+              (sessao) =>
+                  sessao.treinoId == widget.treino.id && sessao.finalizada,
+            )
+            .toList()
+          ..sort((a, b) => b.inicio.compareTo(a.inicio));
+    if (sessoes.isEmpty) return 'Ainda sem histórico deste treino';
+
+    final seriesPorSessao = sessoes
+        .map(
+          (sessao) => sessao.series
+              .where(
+                (serie) =>
+                    serie.exercicioId == item.exercicioId && serie.concluida,
+              )
+              .toList(),
+        )
+        .where((series) => series.isNotEmpty)
+        .toList();
+    if (seriesPorSessao.isEmpty) {
+      return 'Sem séries concluídas deste exercício';
+    }
+
+    final todasAsSeries = seriesPorSessao.expand((series) => series).toList();
+    SerieExecutada compararCarga(SerieExecutada melhor, SerieExecutada serie) {
+      if (serie.cargaKg != melhor.cargaKg) {
+        return serie.cargaKg > melhor.cargaKg ? serie : melhor;
+      }
+      return serie.repeticoesRealizadas > melhor.repeticoesRealizadas
+          ? serie
+          : melhor;
+    }
+
+    SerieExecutada compararRepeticoes(
+      SerieExecutada melhor,
+      SerieExecutada serie,
+    ) {
+      if (serie.repeticoesRealizadas != melhor.repeticoesRealizadas) {
+        return serie.repeticoesRealizadas > melhor.repeticoesRealizadas
+            ? serie
+            : melhor;
+      }
+      return serie.cargaKg > melhor.cargaKg ? serie : melhor;
+    }
+
+    final compararDesempenho = item.pesoCorporal
+        ? compararRepeticoes
+        : compararCarga;
+    final ultimaSerie = seriesPorSessao.first.reduce(compararDesempenho);
+    final maiorCarga = todasAsSeries.reduce(compararCarga);
+    final maisRepeticoes = todasAsSeries.reduce(compararRepeticoes);
+    final resultado = <String>[
+      'Última sessão: ${formatarCarga(ultimaSerie.cargaKg, pesoCorporal: item.pesoCorporal)} '
+          '× ${ultimaSerie.repeticoesRealizadas}',
+    ];
+    if (item.metaCargaKg case final metaCarga?) {
+      resultado.add(
+        'Carga máxima: ${formatarCarga(maiorCarga.cargaKg, pesoCorporal: item.pesoCorporal)} • '
+        '${maiorCarga.cargaKg >= metaCarga ? 'Meta de carga atingida' : 'faltam ${formatarCarga(metaCarga - maiorCarga.cargaKg)}'}',
+      );
+    }
+    if (item.metaRepeticoes case final metaRepeticoes?) {
+      resultado.add(
+        'Mais repetições: ${maisRepeticoes.repeticoesRealizadas} • '
+        '${maisRepeticoes.repeticoesRealizadas >= metaRepeticoes ? 'Meta de repetições atingida' : 'faltam ${metaRepeticoes - maisRepeticoes.repeticoesRealizadas} reps'}',
+      );
+    }
+    return resultado.join(' • ');
+  }
+
+  Future<void> compartilharTreino() async {
+    final dias = widget.treino.diasSemana
+        .map((dia) => _diasTreino[dia - 1])
+        .join(', ');
+    final duracao = _duracaoEstimada(itens);
+    final linhas = <String>[
+      'Treino: ${widget.treino.nome}',
+      if (widget.treino.grupo.trim().isNotEmpty)
+        'Divisão: ${widget.treino.grupo}',
+      if (widget.treino.objetivo.trim().isNotEmpty)
+        'Objetivo: ${widget.treino.objetivo}',
+      if (dias.isNotEmpty) 'Dias sugeridos: $dias',
+      if (duracao != null) 'Duração estimada: cerca de $duracao min',
+      if (widget.treino.anotacoes.trim().isNotEmpty)
+        'Orientações: ${widget.treino.anotacoes.trim()}',
+      '',
+      for (var indice = 0; indice < itens.length; indice++)
+        ..._linhasCompartilhamentoItem(indice, itens[indice]),
+    ];
+    try {
+      final compartilhado =
+          await const MethodChannel('br.com.workholyia.workholy_mobile/sharing')
+              .invokeMethod<bool>('compartilharTexto', {
+                'titulo': 'Treino ${widget.treino.nome}',
+                'texto': linhas.join('\n'),
+              });
+      if (!mounted) return;
+      if (compartilhado != true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('O compartilhamento foi cancelado.')),
+        );
+      }
+    } on PlatformException catch (erro) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Não foi possível compartilhar o treino: ${erro.message}',
+          ),
+        ),
+      );
+    } on MissingPluginException {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Compartilhamento disponível somente no Android.'),
+        ),
+      );
+    }
+  }
+
+  List<String> _linhasCompartilhamentoItem(int indice, ItemTreino item) {
+    final exercicio = encontrarExercicio(item.exercicioId);
+    final nome = exercicio?.nome ?? 'Exercício indisponível';
+    final carga = formatarCarga(item.cargaKg, pesoCorporal: item.pesoCorporal);
+    final meta = _resumoMeta(item);
+    return [
+      '${indice + 1}. $nome',
+      '   ${item.series} × ${item.repeticoes} • $carga • descanso '
+          '${formatarDescanso(item.descansoSegundos)}',
+      if (meta.isNotEmpty) '   Meta: $meta',
+      if (item.instrucoes.trim().isNotEmpty)
+        '   Instruções: ${item.instrucoes.trim()}',
+    ];
+  }
+
+  int? _duracaoEstimada(List<ItemTreino> itensDoTreino) {
+    if (itensDoTreino.isEmpty) return null;
+    final segundos = itensDoTreino.fold<int>(0, (total, item) {
+      final tempoExecucao = item.series * item.repeticoes * 3;
+      final descansos =
+          (item.series - 1).clamp(0, item.series) * item.descansoSegundos;
+      return total + tempoExecucao + descansos + 60;
+    });
+    return (segundos / 60).ceil();
+  }
+
+  Future<void> reordenarExercicio(int indiceAntigo, int indiceNovo) async {
+    setState(() {
+      final item = itens.removeAt(indiceAntigo);
+      itens.insert(indiceNovo, item);
+    });
+    await persistir();
+  }
+
   Future<void> persistir() async {
     setState(() => salvando = true);
 
@@ -2755,12 +3560,14 @@ class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
 
       if (!mounted) return;
 
+      _itensSalvos = List<ItemTreino>.from(itens);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Treino salvo com sucesso.')),
       );
     } catch (erro) {
       if (!mounted) return;
 
+      setState(() => itens = List<ItemTreino>.from(_itensSalvos));
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Erro ao salvar o treino: $erro')));
@@ -2906,12 +3713,11 @@ class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
     await persistir();
   }
 
-  String formatarCarga(double carga) {
-    if (carga == 0) return 'Carga não informada';
-    final numero = carga % 1 == 0
-        ? carga.toStringAsFixed(0)
-        : carga.toStringAsFixed(1);
-    return '$numero kg';
+  String formatarCarga(double carga, {bool pesoCorporal = false}) {
+    return PreferenciaUnidadeCarga.instancia.formatar(
+      carga,
+      pesoCorporal: pesoCorporal,
+    );
   }
 
   String formatarDescanso(int segundos) {
@@ -2929,6 +3735,11 @@ class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
         title: Text(widget.treino.nome),
         actions: [
           IconButton(
+            tooltip: 'Compartilhar treino',
+            onPressed: itens.isEmpty ? null : compartilharTreino,
+            icon: const Icon(Icons.share_outlined),
+          ),
+          IconButton(
             tooltip: 'Iniciar treino',
             onPressed: salvando || itens.isEmpty
                 ? null
@@ -2944,8 +3755,8 @@ class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: salvando ? null : adicionarExercicio,
-        backgroundColor: verde,
-        foregroundColor: Colors.black,
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Theme.of(context).colorScheme.onPrimary,
         icon: const Icon(Icons.add),
         label: const Text('Adicionar exercício'),
       ),
@@ -2958,7 +3769,7 @@ class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: superficie,
+                  color: Theme.of(context).colorScheme.surfaceContainerLow,
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Column(
@@ -2968,19 +3779,53 @@ class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
                       widget.treino.objetivo.isEmpty
                           ? 'Objetivo não definido'
                           : widget.treino.objetivo,
-                      style: const TextStyle(
-                        color: textoSecundario,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                         fontSize: 15,
                       ),
                     ),
                     const SizedBox(height: 12),
                     Text(
                       '${itens.length} ${itens.length == 1 ? 'exercício configurado' : 'exercícios configurados'}',
-                      style: const TextStyle(
-                        color: verde,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.primary,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
+                    if (widget.treino.grupo.trim().isNotEmpty ||
+                        widget.treino.diasSemana.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: [
+                          if (widget.treino.grupo.trim().isNotEmpty)
+                            Chip(
+                              visualDensity: VisualDensity.compact,
+                              label: Text(widget.treino.grupo),
+                            ),
+                          if (widget.treino.diasSemana.isNotEmpty)
+                            Chip(
+                              visualDensity: VisualDensity.compact,
+                              avatar: const Icon(Icons.event_repeat, size: 16),
+                              label: Text(
+                                widget.treino.diasSemana
+                                    .map((dia) => _diasTreino[dia - 1])
+                                    .join(', '),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                    if (widget.treino.anotacoes.trim().isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        widget.treino.anotacoes,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -3007,10 +3852,14 @@ class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
                               ),
                             ),
                             const SizedBox(height: 8),
-                            const Text(
+                            Text(
                               'Adicione exercícios cadastrados e configure séries, repetições, carga e descanso.',
                               textAlign: TextAlign.center,
-                              style: TextStyle(color: textoSecundario),
+                              style: TextStyle(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                              ),
                             ),
                             const SizedBox(height: 18),
                             ElevatedButton.icon(
@@ -3022,113 +3871,167 @@ class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
                         ),
                       ),
                     )
-                  : ListView.separated(
+                  : ReorderableListView.builder(
                       padding: const EdgeInsets.fromLTRB(18, 0, 18, 100),
+                      buildDefaultDragHandles: false,
                       itemCount: itens.length,
-                      separatorBuilder: (_, indiceSeparador) =>
-                          const SizedBox(height: 10),
+                      onReorderItem: salvando ? null : reordenarExercicio,
                       itemBuilder: (context, indice) {
                         final item = itens[indice];
                         final exercicio = encontrarExercicio(item.exercicioId);
+                        final ultimaExecucao = _resumoUltimaExecucao(item);
+                        final meta = _resumoMeta(item);
 
                         return Card(
-                          margin: EdgeInsets.zero,
+                          key: ValueKey(item.id),
+                          margin: const EdgeInsets.only(bottom: 10),
+                          clipBehavior: Clip.antiAlias,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14),
                           ),
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(14),
-                            onTap: () => editarExercicio(item),
-                            child: Padding(
-                              padding: const EdgeInsets.all(14),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Container(
-                                    width: 40,
-                                    height: 40,
-                                    decoration: BoxDecoration(
-                                      color: verde.withValues(alpha: 0.12),
-                                      borderRadius: BorderRadius.circular(10),
+                          child: Padding(
+                            padding: const EdgeInsets.all(14),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                ReorderableDragStartListener(
+                                  index: indice,
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(
+                                      top: 8,
+                                      right: 10,
                                     ),
-                                    child: Center(
-                                      child: Text(
-                                        '${indice + 1}',
-                                        style: const TextStyle(
-                                          color: verde,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 17,
-                                        ),
+                                    child: Icon(
+                                      Icons.drag_handle,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant,
+                                    ),
+                                  ),
+                                ),
+                                Container(
+                                  width: 36,
+                                  height: 36,
+                                  decoration: BoxDecoration(
+                                    color: verde.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      '${indice + 1}',
+                                      style: TextStyle(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primary,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
                                       ),
                                     ),
                                   ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          exercicio?.nome ??
-                                              'Exercício indisponível',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 16,
-                                          ),
-                                        ),
-                                        if (exercicio != null) ...[
-                                          const SizedBox(height: 3),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: InkWell(
+                                    onTap: () => editarExercicio(item),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 2,
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
                                           Text(
-                                            exercicio.grupo,
+                                            exercicio?.nome ??
+                                                'Exercício indisponível',
                                             style: const TextStyle(
-                                              color: textoSecundario,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 16,
                                             ),
                                           ),
+                                          if (exercicio != null) ...[
+                                            const SizedBox(height: 3),
+                                            Text(
+                                              exercicio.grupo,
+                                              style: TextStyle(
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .onSurfaceVariant,
+                                              ),
+                                            ),
+                                          ],
+                                          const SizedBox(height: 8),
+                                          Text(
+                                            '${item.series} séries × ${item.repeticoes} repetições',
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            '${formatarCarga(item.cargaKg, pesoCorporal: item.pesoCorporal)} • Descanso: ${formatarDescanso(item.descansoSegundos)}',
+                                            style: TextStyle(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurfaceVariant,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                          if (meta.isNotEmpty) ...[
+                                            const SizedBox(height: 5),
+                                            Text(
+                                              'Meta: $meta',
+                                              style: TextStyle(
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .primary,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ],
+                                          const SizedBox(height: 5),
+                                          Text(
+                                            ultimaExecucao,
+                                            style: TextStyle(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurfaceVariant,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                          if (item.instrucoes
+                                              .trim()
+                                              .isNotEmpty) ...[
+                                            const SizedBox(height: 6),
+                                            Text(
+                                              item.instrucoes,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall,
+                                            ),
+                                          ],
                                         ],
-                                        const SizedBox(height: 10),
-                                        Text(
-                                          '${item.series} séries × ${item.repeticoes} repetições',
-                                        ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          '${formatarCarga(item.cargaKg)} • Descanso: ${formatarDescanso(item.descansoSegundos)}',
-                                          style: const TextStyle(
-                                            color: textoSecundario,
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 6),
-                                        const Text(
-                                          'Toque para editar',
-                                          style: TextStyle(
-                                            color: verde,
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                      ],
+                                      ),
                                     ),
                                   ),
-                                  PopupMenuButton<String>(
-                                    onSelected: (opcao) {
-                                      if (opcao == 'editar') {
-                                        editarExercicio(item);
-                                      } else if (opcao == 'remover') {
-                                        removerExercicio(item);
-                                      }
-                                    },
-                                    itemBuilder: (_) => const [
-                                      PopupMenuItem(
-                                        value: 'editar',
-                                        child: Text('Editar configuração'),
-                                      ),
-                                      PopupMenuItem(
-                                        value: 'remover',
-                                        child: Text('Remover do treino'),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
+                                ),
+                                PopupMenuButton<String>(
+                                  onSelected: (opcao) {
+                                    if (opcao == 'editar') {
+                                      editarExercicio(item);
+                                    } else if (opcao == 'remover') {
+                                      removerExercicio(item);
+                                    }
+                                  },
+                                  itemBuilder: (_) => const [
+                                    PopupMenuItem(
+                                      value: 'editar',
+                                      child: Text('Editar configuração'),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'remover',
+                                      child: Text('Remover do treino'),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
                           ),
                         );
@@ -3136,7 +4039,10 @@ class _DetalheTreinoPageState extends State<DetalheTreinoPage> {
                     ),
             ),
             if (salvando)
-              const LinearProgressIndicator(color: verde, minHeight: 3),
+              LinearProgressIndicator(
+                color: Theme.of(context).colorScheme.primary,
+                minHeight: 3,
+              ),
           ],
         ),
       ),
@@ -3165,6 +4071,10 @@ class _ConfiguracaoExercicioDialogState
   late final TextEditingController repeticoesController;
   late final TextEditingController cargaController;
   late final TextEditingController descansoController;
+  late final TextEditingController instrucoesController;
+  late final TextEditingController metaCargaController;
+  late final TextEditingController metaRepeticoesController;
+  bool pesoCorporal = false;
 
   String? erroValidacao;
 
@@ -3173,14 +4083,28 @@ class _ConfiguracaoExercicioDialogState
     super.initState();
 
     final item = widget.item;
+    pesoCorporal = item.pesoCorporal;
 
     seriesController = TextEditingController(text: '${item.series}');
     repeticoesController = TextEditingController(text: '${item.repeticoes}');
+    final cargaExibida = PreferenciaUnidadeCarga.instancia.deKg(item.cargaKg);
     cargaController = TextEditingController(
-      text: item.cargaKg.toStringAsFixed(item.cargaKg % 1 == 0 ? 0 : 1),
+      text: cargaExibida.toStringAsFixed(cargaExibida % 1 == 0 ? 0 : 1),
     );
     descansoController = TextEditingController(
       text: '${item.descansoSegundos}',
+    );
+    instrucoesController = TextEditingController(text: item.instrucoes);
+    final metaCargaExibida = item.metaCargaKg == null
+        ? null
+        : PreferenciaUnidadeCarga.instancia.deKg(item.metaCargaKg!);
+    metaCargaController = TextEditingController(
+      text: metaCargaExibida == null
+          ? ''
+          : metaCargaExibida.toStringAsFixed(metaCargaExibida % 1 == 0 ? 0 : 1),
+    );
+    metaRepeticoesController = TextEditingController(
+      text: item.metaRepeticoes?.toString() ?? '',
     );
   }
 
@@ -3190,6 +4114,9 @@ class _ConfiguracaoExercicioDialogState
     repeticoesController.dispose();
     cargaController.dispose();
     descansoController.dispose();
+    instrucoesController.dispose();
+    metaCargaController.dispose();
+    metaRepeticoesController.dispose();
     super.dispose();
   }
 
@@ -3199,6 +4126,14 @@ class _ConfiguracaoExercicioDialogState
     final cargaTexto = cargaController.text.trim().replaceAll(',', '.');
     final carga = double.tryParse(cargaTexto);
     final descanso = int.tryParse(descansoController.text.trim());
+    final metaCargaTexto = metaCargaController.text.trim().replaceAll(',', '.');
+    final metaCarga = metaCargaTexto.isEmpty
+        ? null
+        : double.tryParse(metaCargaTexto);
+    final metaRepeticoesTexto = metaRepeticoesController.text.trim();
+    final metaRepeticoes = metaRepeticoesTexto.isEmpty
+        ? null
+        : int.tryParse(metaRepeticoesTexto);
 
     if (series == null ||
         repeticoes == null ||
@@ -3208,9 +4143,17 @@ class _ConfiguracaoExercicioDialogState
         repeticoes < 1 ||
         !carga.isFinite ||
         carga < 0 ||
-        descanso < 0) {
+        descanso < 0 ||
+        descanso > descansoMaximoSegundos ||
+        (metaCargaTexto.isNotEmpty &&
+            (metaCarga == null || !metaCarga.isFinite || metaCarga < 0)) ||
+        (metaRepeticoesTexto.isNotEmpty &&
+            (metaRepeticoes == null || metaRepeticoes < 1))) {
       setState(() {
-        erroValidacao = 'Confira os valores. Séries e repetições devem ser maiores que zero; carga e descanso não podem ser negativos.';
+        erroValidacao =
+            'Séries e repetições devem ser maiores que zero. A carga não pode '
+            'ser negativa, as metas devem ser válidas e o descanso deve ficar '
+            'entre 0 e $descansoMaximoSegundos segundos.';
       });
       return;
     }
@@ -3224,8 +4167,16 @@ class _ConfiguracaoExercicioDialogState
         exercicioId: item.exercicioId,
         series: series,
         repeticoes: repeticoes,
-        cargaKg: carga,
+        cargaKg: pesoCorporal
+            ? 0
+            : PreferenciaUnidadeCarga.instancia.paraKg(carga),
         descansoSegundos: descanso,
+        pesoCorporal: pesoCorporal,
+        instrucoes: instrucoesController.text.trim(),
+        metaCargaKg: pesoCorporal || metaCarga == null
+            ? null
+            : PreferenciaUnidadeCarga.instancia.paraKg(metaCarga),
+        metaRepeticoes: metaRepeticoes,
       ),
     );
   }
@@ -3241,8 +4192,8 @@ class _ConfiguracaoExercicioDialogState
           children: [
             Text(
               widget.nomeExercicio,
-              style: const TextStyle(
-                color: verde,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.primary,
                 fontWeight: FontWeight.bold,
                 fontSize: 17,
               ),
@@ -3270,14 +4221,24 @@ class _ConfiguracaoExercicioDialogState
             const SizedBox(height: 12),
             TextField(
               controller: cargaController,
+              enabled: !pesoCorporal,
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
                 signed: false,
               ),
-              decoration: const InputDecoration(
-                labelText: 'Carga (kg)',
+              decoration: InputDecoration(
+                labelText:
+                    'Carga (${PreferenciaUnidadeCarga.instancia.rotulo})',
                 hintText: '0 para peso corporal ou não informado',
               ),
+            ),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Exercício com peso corporal'),
+              value: pesoCorporal,
+              onChanged: (valor) {
+                setState(() => pesoCorporal = valor ?? false);
+              },
             ),
             const SizedBox(height: 12),
             TextField(
@@ -3285,6 +4246,53 @@ class _ConfiguracaoExercicioDialogState
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
                 labelText: 'Descanso entre séries (segundos)',
+                helperText: 'Máximo: 3600 segundos',
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Metas de progressão (opcional)',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: metaCargaController,
+                    enabled: !pesoCorporal,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                      signed: false,
+                    ),
+                    decoration: InputDecoration(
+                      labelText:
+                          'Meta de carga (${PreferenciaUnidadeCarga.instancia.rotulo})',
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: metaRepeticoesController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Meta de repetições',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: instrucoesController,
+              textCapitalization: TextCapitalization.sentences,
+              minLines: 2,
+              maxLines: 5,
+              maxLength: 500,
+              decoration: const InputDecoration(
+                labelText: 'Instruções para este exercício',
+                hintText: 'Dicas de execução, amplitude ou ritmo',
               ),
             ),
             if (erroValidacao != null) ...[
@@ -3315,18 +4323,21 @@ class _ConfiguracaoExercicioDialogState
 class ExecucaoTreinoPage extends StatefulWidget {
   final SessaoTreino sessaoInicial;
   final Future<void> Function(SessaoTreino) onSalvar;
+  final Map<String, double> cargasMaximasAnteriores;
 
   const ExecucaoTreinoPage({
     super.key,
     required this.sessaoInicial,
     required this.onSalvar,
+    this.cargasMaximasAnteriores = const {},
   });
 
   @override
   State<ExecucaoTreinoPage> createState() => _ExecucaoTreinoPageState();
 }
 
-class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
+class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage>
+    with WidgetsBindingObserver {
   late SessaoTreino sessao;
   bool salvando = false;
   bool finalizando = false;
@@ -3335,6 +4346,7 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
 
   int descansoTotal = 60;
   int segundosRestantes = 60;
+  DateTime? _descansoTerminaEm;
 
   bool descansoAtivo = false;
   bool descansoPausado = false;
@@ -3342,12 +4354,31 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
   void initState() {
     super.initState();
     sessao = widget.sessaoInicial;
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && descansoAtivo) {
+      _atualizarDescanso();
+    }
   }
 
   void iniciarDescanso(int duracaoSegundos) {
     temporizador?.cancel();
 
-    final int duracao = duracaoSegundos.clamp(0, 3600).toInt();
+    if (duracaoSegundos > descansoMaximoSegundos) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'O descanso salvo excede 60 minutos; a contagem foi limitada a 60 minutos.',
+          ),
+        ),
+      );
+    }
+    final int duracao = duracaoSegundos
+        .clamp(0, descansoMaximoSegundos)
+        .toInt();
 
     if (duracao == 0) {
       setState(() {
@@ -3355,6 +4386,7 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
         segundosRestantes = 0;
         descansoAtivo = false;
         descansoPausado = false;
+        _descansoTerminaEm = null;
       });
       return;
     }
@@ -3364,6 +4396,7 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
       segundosRestantes = duracao;
       descansoAtivo = true;
       descansoPausado = false;
+      _descansoTerminaEm = DateTime.now().add(Duration(seconds: duracao));
     });
 
     executarContagem();
@@ -3378,38 +4411,54 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
         return;
       }
 
-      if (segundosRestantes <= 1) {
-        timer.cancel();
-
-        setState(() {
-          segundosRestantes = 0;
-          descansoAtivo = false;
-          descansoPausado = false;
-        });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Descanso finalizado! Próxima série.'),
-            duration: Duration(seconds: 3),
-          ),
-        );
-
-        return;
-      }
-
-      setState(() {
-        segundosRestantes--;
-      });
+      _atualizarDescanso();
     });
+  }
+
+  void _atualizarDescanso() {
+    final terminaEm = _descansoTerminaEm;
+    if (!mounted || terminaEm == null) return;
+
+    final restante = terminaEm.difference(DateTime.now()).inSeconds;
+    if (restante <= 0) {
+      temporizador?.cancel();
+      setState(() {
+        segundosRestantes = 0;
+        descansoAtivo = false;
+        descansoPausado = false;
+        _descansoTerminaEm = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Descanso finalizado! Próxima série.'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
+    if (restante != segundosRestantes) {
+      setState(() => segundosRestantes = restante);
+    }
   }
 
   void pausarDescanso() {
     if (!descansoAtivo || descansoPausado) return;
 
     temporizador?.cancel();
+    final terminaEm = _descansoTerminaEm;
+    final restante = terminaEm == null
+        ? segundosRestantes
+        : terminaEm
+              .difference(DateTime.now())
+              .inSeconds
+              .clamp(0, descansoTotal)
+              .toInt();
 
     setState(() {
+      segundosRestantes = restante;
       descansoPausado = true;
+      _descansoTerminaEm = null;
     });
   }
 
@@ -3418,6 +4467,9 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
 
     setState(() {
       descansoPausado = false;
+      _descansoTerminaEm = DateTime.now().add(
+        Duration(seconds: segundosRestantes),
+      );
     });
 
     executarContagem();
@@ -3432,6 +4484,7 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
       descansoAtivo = false;
       descansoPausado = false;
       segundosRestantes = descansoTotal;
+      _descansoTerminaEm = null;
     });
   }
 
@@ -3446,12 +4499,15 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
   @override
   void dispose() {
     temporizador?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
-  String formatarCarga(double carga) {
-    if (carga == 0) return 'Peso corporal / não informado';
-    return '${carga.toStringAsFixed(carga % 1 == 0 ? 0 : 1)} kg';
+  String formatarCarga(double carga, {bool pesoCorporal = false}) {
+    return PreferenciaUnidadeCarga.instancia.formatar(
+      carga,
+      pesoCorporal: pesoCorporal,
+    );
   }
 
   String formatarData(DateTime data) {
@@ -3504,6 +4560,7 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
       sessao = encerrada;
       descansoAtivo = false;
       descansoPausado = false;
+      _descansoTerminaEm = null;
     });
 
     try {
@@ -3514,10 +4571,12 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
       await Navigator.pushReplacement<void, void>(
         context,
         MaterialPageRoute(
-          builder: (_) => ResumoTreinoPage(sessao: encerrada),
+          builder: (_) => ResumoTreinoPage(
+            sessao: encerrada,
+            cargasMaximasAnteriores: widget.cargasMaximasAnteriores,
+          ),
         ),
       );
-
     } catch (erro) {
       if (!mounted) return;
 
@@ -3527,9 +4586,7 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao concluir o treino: $erro'),
-        ),
+        SnackBar(content: Text('Erro ao concluir o treino: $erro')),
       );
     }
   }
@@ -3572,69 +4629,72 @@ class _ExecucaoTreinoPageState extends State<ExecucaoTreinoPage> {
     await atualizarSerie(resultado);
   }
 
+  Future<void> finalizarTreino() async {
+    if (finalizando || salvando || sessao.finalizada) return;
 
-Future<void> finalizarTreino() async {
-  if (finalizando || salvando || sessao.finalizada) return;
-
-  final confirmar = await showDialog<bool>(
-    context: context,
-    builder: (dialogContext) => AlertDialog(
-      title: const Text('Finalizar treino?'),
-      content: Text(
-        'Você concluiu ${sessao.seriesConcluidas} de '
-        '${sessao.series.length} séries.\n\n'
-        'Deseja encerrar esta sessão?',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext, false),
-          child: const Text('Continuar treino'),
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Finalizar treino?'),
+        content: Text(
+          'Você concluiu ${sessao.seriesConcluidas} de '
+          '${sessao.series.length} séries.\n\n'
+          'Deseja encerrar esta sessão?',
         ),
-        FilledButton(
-          onPressed: () => Navigator.pop(dialogContext, true),
-          child: const Text('Finalizar'),
-        ),
-      ],
-    ),
-  );
-
-  if (confirmar != true || !mounted) return;
-
-  final sessaoAnterior = sessao;
-  final encerrada = sessao.copiar(fim: DateTime.now());
-
-  setState(() {
-    finalizando = true;
-    sessao = encerrada;
-  });
-
-  try {
-    await widget.onSalvar(encerrada);
-
-    if (!mounted) return;
-
-    await Navigator.pushReplacement<void, void>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => ResumoTreinoPage(sessao: encerrada),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Continuar treino'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Finalizar'),
+          ),
+        ],
       ),
     );
-  } catch (erro) {
-    if (!mounted) return;
+
+    if (confirmar != true || !mounted) return;
+    temporizador?.cancel();
+
+    final sessaoAnterior = sessao;
+    final encerrada = sessao.copiar(fim: DateTime.now());
 
     setState(() {
-      sessao = sessaoAnterior;
-      finalizando = false;
+      finalizando = true;
+      sessao = encerrada;
+      descansoAtivo = false;
+      descansoPausado = false;
+      _descansoTerminaEm = null;
     });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Não foi possível finalizar o treino: $erro'),
-      ),
-    );
-  }
-}
+    try {
+      await widget.onSalvar(encerrada);
 
+      if (!mounted) return;
+
+      await Navigator.pushReplacement<void, void>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ResumoTreinoPage(
+            sessao: encerrada,
+            cargasMaximasAnteriores: widget.cargasMaximasAnteriores,
+          ),
+        ),
+      );
+    } catch (erro) {
+      if (!mounted) return;
+
+      setState(() {
+        sessao = sessaoAnterior;
+        finalizando = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Não foi possível finalizar o treino: $erro')),
+      );
+    }
+  }
 
   Widget construirSerie(SerieExecutada serie) {
     final bloqueada = salvando || finalizando || sessao.finalizada;
@@ -3644,13 +4704,13 @@ Future<void> finalizarTreino() async {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: serie.concluida
-            ? verde.withValues(alpha: 0.09)
-            : fundo.withValues(alpha: 0.55),
+            ? Theme.of(context).colorScheme.primaryContainer
+            : Theme.of(context).colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: serie.concluida
-              ? verde.withValues(alpha: 0.5)
-              : Colors.white12,
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context).colorScheme.outlineVariant,
         ),
       ),
       child: Column(
@@ -3664,12 +4724,15 @@ Future<void> finalizarTreino() async {
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: serie.concluida
-                      ? verde
-                      : Colors.white.withValues(alpha: 0.08),
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(11),
                 ),
                 child: serie.concluida
-                    ? const Icon(Icons.check, color: Colors.black)
+                    ? Icon(
+                        Icons.check,
+                        color: Theme.of(context).colorScheme.onPrimary,
+                      )
                     : Text(
                         '${serie.numeroSerie}',
                         style: const TextStyle(
@@ -3693,8 +4756,10 @@ Future<void> finalizarTreino() async {
                     const SizedBox(height: 4),
                     Text(
                       '${serie.repeticoesRealizadas} repetições • '
-                      '${formatarCarga(serie.cargaKg)}',
-                      style: const TextStyle(color: textoSecundario),
+                      '${formatarCarga(serie.cargaKg, pesoCorporal: serie.pesoCorporal)}',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
@@ -3718,8 +4783,12 @@ Future<void> finalizarTreino() async {
                 serie.concluida ? 'Desmarcar série' : 'Concluir série',
               ),
               style: FilledButton.styleFrom(
-                backgroundColor: serie.concluida ? superficie : verde,
-                foregroundColor: serie.concluida ? Colors.white : Colors.black,
+                backgroundColor: serie.concluida
+                    ? Theme.of(context).colorScheme.secondaryContainer
+                    : Theme.of(context).colorScheme.primary,
+                foregroundColor: serie.concluida
+                    ? Theme.of(context).colorScheme.onSecondaryContainer
+                    : Theme.of(context).colorScheme.onPrimary,
                 padding: const EdgeInsets.symmetric(vertical: 13),
               ),
             ),
@@ -3739,13 +4808,13 @@ Future<void> finalizarTreino() async {
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: superficie,
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: verde.withValues(alpha: 0.55)),
       ),
       child: Column(
         children: [
-          const Row(
+          Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(Icons.timer_outlined, color: verde),
@@ -3753,7 +4822,7 @@ Future<void> finalizarTreino() async {
               Text(
                 'TEMPO DE DESCANSO',
                 style: TextStyle(
-                  color: textoSecundario,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 1,
                 ),
@@ -3763,8 +4832,8 @@ Future<void> finalizarTreino() async {
           const SizedBox(height: 8),
           Text(
             formatarTempo(segundosRestantes),
-            style: const TextStyle(
-              color: verde,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.primary,
               fontSize: 44,
               fontWeight: FontWeight.bold,
             ),
@@ -3775,8 +4844,10 @@ Future<void> finalizarTreino() async {
             child: LinearProgressIndicator(
               value: progresso.clamp(0.0, 1.0),
               minHeight: 6,
-              color: verde,
-              backgroundColor: Colors.white12,
+              color: Theme.of(context).colorScheme.primary,
+              backgroundColor: Theme.of(context)
+                  .colorScheme
+                  .surfaceContainerHighest,
             ),
           ),
           const SizedBox(height: 12),
@@ -3796,8 +4867,8 @@ Future<void> finalizarTreino() async {
                   icon: const Icon(Icons.skip_next),
                   label: const Text('Pular descanso'),
                   style: FilledButton.styleFrom(
-                    backgroundColor: verde,
-                    foregroundColor: Colors.black,
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
                   ),
                 ),
               ),
@@ -3805,9 +4876,11 @@ Future<void> finalizarTreino() async {
           ),
           if (descansoPausado) ...[
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Descanso pausado',
-              style: TextStyle(color: textoSecundario),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ],
@@ -3851,7 +4924,7 @@ Future<void> finalizarTreino() async {
               margin: const EdgeInsets.fromLTRB(16, 8, 16, 14),
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: superficie,
+                color: Theme.of(context).colorScheme.surfaceContainerLow,
                 borderRadius: BorderRadius.circular(18),
               ),
               child: Column(
@@ -3860,19 +4933,21 @@ Future<void> finalizarTreino() async {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Expanded(
+                      Expanded(
                         child: Text(
                           'Seu progresso',
                           style: TextStyle(
-                            color: textoSecundario,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
                             fontSize: 14,
                           ),
                         ),
                       ),
                       Text(
                         '$percentual%',
-                        style: const TextStyle(
-                          color: verde,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.primary,
                           fontSize: 25,
                           fontWeight: FontWeight.bold,
                         ),
@@ -3885,8 +4960,10 @@ Future<void> finalizarTreino() async {
                     child: LinearProgressIndicator(
                       value: progresso,
                       minHeight: 9,
-                      color: verde,
-                      backgroundColor: Colors.white12,
+                      color: Theme.of(context).colorScheme.primary,
+                      backgroundColor: Theme.of(context)
+                          .colorScheme
+                          .surfaceContainerHighest,
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -3907,17 +4984,17 @@ Future<void> finalizarTreino() async {
                   const SizedBox(height: 6),
                   Text(
                     'Início: ${formatarData(sessao.inicio)}',
-                    style: const TextStyle(
-                      color: textoSecundario,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                       fontSize: 12,
                     ),
                   ),
                   if (sessao.finalizada) ...[
                     const SizedBox(height: 8),
-                    const Text(
+                    Text(
                       'Sessão finalizada',
                       style: TextStyle(
-                        color: verde,
+                        color: Theme.of(context).colorScheme.primary,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -3980,11 +5057,40 @@ Future<void> finalizarTreino() async {
                                           const SizedBox(height: 4),
                                           Text(
                                             '$feitas de $totalExercicio séries',
-                                            style: const TextStyle(
-                                              color: textoSecundario,
+                                            style: TextStyle(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurfaceVariant,
                                               fontSize: 13,
                                             ),
                                           ),
+                                          if (primeira.instrucoes
+                                              .trim()
+                                              .isNotEmpty) ...[
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              primeira.instrucoes,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall,
+                                            ),
+                                          ],
+                                          if (primeira.metaCargaKg != null ||
+                                              primeira.metaRepeticoes !=
+                                                  null) ...[
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              'Meta: ${[if (primeira.metaCargaKg case final metaCarga?) formatarCarga(metaCarga), if (primeira.metaRepeticoes case final metaRepeticoes?) '$metaRepeticoes repetições'].join(' • ')}',
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall
+                                                  ?.copyWith(
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .primary,
+                                                  ),
+                                            ),
+                                          ],
                                         ],
                                       ),
                                     ),
@@ -4002,8 +5108,12 @@ Future<void> finalizarTreino() async {
                                         ? 0
                                         : feitas / totalExercicio,
                                     minHeight: 5,
-                                    color: verde,
-                                    backgroundColor: Colors.white12,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .primary,
+                                    backgroundColor: Theme.of(context)
+                                        .colorScheme
+                                        .surfaceContainerHighest,
                                   ),
                                 ),
                               ),
@@ -4017,7 +5127,10 @@ Future<void> finalizarTreino() async {
                     ),
             ),
             if (salvando || finalizando)
-              const LinearProgressIndicator(color: verde, minHeight: 3),
+              LinearProgressIndicator(
+                color: Theme.of(context).colorScheme.primary,
+                minHeight: 3,
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
               child: SizedBox(
@@ -4033,8 +5146,8 @@ Future<void> finalizarTreino() async {
                         : 'Finalizar treino',
                   ),
                   style: FilledButton.styleFrom(
-                    backgroundColor: verde,
-                    foregroundColor: Colors.black,
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
                 ),
@@ -4049,10 +5162,12 @@ Future<void> finalizarTreino() async {
 
 class ResumoTreinoPage extends StatelessWidget {
   final SessaoTreino sessao;
+  final Map<String, double> cargasMaximasAnteriores;
 
   const ResumoTreinoPage({
     super.key,
     required this.sessao,
+    this.cargasMaximasAnteriores = const {},
   });
 
   String formatarData(DateTime data) {
@@ -4083,8 +5198,7 @@ class ResumoTreinoPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final total = sessao.series.length;
     final concluidas = sessao.seriesConcluidas;
-    final percentual =
-        total == 0 ? 0 : (concluidas * 100 / total).round();
+    final percentual = total == 0 ? 0 : (concluidas * 100 / total).round();
 
     final fim = sessao.fim ?? DateTime.now();
     final duracao = fim.difference(sessao.inicio);
@@ -4092,9 +5206,7 @@ class ResumoTreinoPage extends StatelessWidget {
     final agrupadas = <String, List<SerieExecutada>>{};
 
     for (final serie in sessao.series) {
-      agrupadas
-          .putIfAbsent(serie.exercicioId, () => [])
-          .add(serie);
+      agrupadas.putIfAbsent(serie.exercicioId, () => []).add(serie);
     }
 
     final exerciciosConcluidos = agrupadas.values.where((series) {
@@ -4102,31 +5214,26 @@ class ResumoTreinoPage extends StatelessWidget {
     }).length;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Resumo do treino'),
-      ),
+      appBar: AppBar(title: const Text('Resumo do treino')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(18),
           children: [
-            const Icon(
-              Icons.emoji_events_outlined,
-              size: 64,
-              color: verde,
-            ),
+            const Icon(Icons.emoji_events_outlined, size: 64, color: verde),
             const SizedBox(height: 12),
             Text(
               'Treino concluído!',
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+              style: Theme.of(context).textTheme.headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 6),
             Text(
               sessao.nomeTreino,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: textoSecundario),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 24),
             Card(
@@ -4136,34 +5243,60 @@ class ResumoTreinoPage extends StatelessWidget {
                   children: [
                     Text(
                       '$percentual%',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 38,
                         fontWeight: FontWeight.bold,
-                        color: verde,
+                        color: Theme.of(context).colorScheme.primary,
                       ),
                     ),
                     const Text('Conclusão do treino'),
                     const SizedBox(height: 16),
                     LinearProgressIndicator(
                       value: total == 0 ? 0 : concluidas / total,
-                      color: verde,
-                      backgroundColor: Colors.white12,
+                      color: Theme.of(context).colorScheme.primary,
+                      backgroundColor: Theme.of(context)
+                          .colorScheme
+                          .surfaceContainerHighest,
                       minHeight: 8,
                     ),
                     const SizedBox(height: 20),
-                    _itemResumo('Séries concluídas', '$concluidas de $total'),
                     _itemResumo(
+                      context,
+                      'Séries concluídas',
+                      '$concluidas de $total',
+                    ),
+                    _itemResumo(
+                      context,
                       'Exercícios concluídos',
                       '$exerciciosConcluidos de ${agrupadas.length}',
                     ),
-                    _itemResumo('Duração', formatarDuracao(duracao)),
-                    _itemResumo('Início', formatarData(sessao.inicio)),
-                    _itemResumo('Término', formatarData(fim)),
+                    _itemResumo(context, 'Duração', formatarDuracao(duracao)),
+                    _itemResumo(context, 'Início', formatarData(sessao.inicio)),
+                    _itemResumo(context, 'Término', formatarData(fim)),
                   ],
                 ),
               ),
             ),
             const SizedBox(height: 20),
+            if (sessao.anotacoes.isNotEmpty) ...[
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Anotações',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(sessao.anotacoes),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
             const Text(
               'Detalhamento por exercício',
               style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
@@ -4171,8 +5304,18 @@ class ResumoTreinoPage extends StatelessWidget {
             const SizedBox(height: 10),
             ...agrupadas.entries.map((entrada) {
               final series = entrada.value;
-              final feitas =
-                  series.where((serie) => serie.concluida).length;
+              final feitas = series.where((serie) => serie.concluida).length;
+              final maiorCargaAtual = series
+                  .where((serie) => serie.concluida)
+                  .fold<double>(
+                    0,
+                    (maior, serie) =>
+                        serie.cargaKg > maior ? serie.cargaKg : maior,
+                  );
+              final maiorCargaAnterior =
+                  cargasMaximasAnteriores[entrada.key] ?? 0;
+              final novoRecorde =
+                  maiorCargaAtual > maiorCargaAnterior && maiorCargaAtual > 0;
 
               return Card(
                 margin: const EdgeInsets.only(bottom: 10),
@@ -4188,15 +5331,35 @@ class ResumoTreinoPage extends StatelessWidget {
                           fontWeight: FontWeight.bold,
                         ),
                       ),
+                      if (novoRecorde) ...[
+                        const SizedBox(height: 5),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.emoji_events,
+                              size: 17,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            SizedBox(width: 5),
+                            Text(
+                              'Novo recorde de carga!',
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.primary,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                       const SizedBox(height: 5),
                       Text('$feitas de ${series.length} séries concluídas'),
                       const Divider(),
                       ...series.map((serie) {
-                        final carga = serie.cargaKg == 0
-                            ? 'Peso corporal / não informado'
-                            : '${serie.cargaKg.toStringAsFixed(
-                                serie.cargaKg % 1 == 0 ? 0 : 1,
-                              )} kg';
+                        final carga = PreferenciaUnidadeCarga.instancia
+                            .formatar(
+                              serie.cargaKg,
+                              pesoCorporal: serie.pesoCorporal,
+                            );
 
                         return Padding(
                           padding: const EdgeInsets.symmetric(vertical: 4),
@@ -4208,7 +5371,9 @@ class ResumoTreinoPage extends StatelessWidget {
                                     : Icons.radio_button_unchecked,
                                 color: serie.concluida
                                     ? verde
-                                    : textoSecundario,
+                                    : Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant,
                                 size: 19,
                               ),
                               const SizedBox(width: 8),
@@ -4233,8 +5398,8 @@ class ResumoTreinoPage extends StatelessWidget {
               icon: const Icon(Icons.check),
               label: const Text('Voltar ao aplicativo'),
               style: FilledButton.styleFrom(
-                backgroundColor: verde,
-                foregroundColor: Colors.black,
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
                 padding: const EdgeInsets.symmetric(vertical: 15),
               ),
             ),
@@ -4244,7 +5409,7 @@ class ResumoTreinoPage extends StatelessWidget {
     );
   }
 
-  Widget _itemResumo(String titulo, String valor) {
+  Widget _itemResumo(BuildContext context, String titulo, String valor) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
@@ -4253,7 +5418,9 @@ class ResumoTreinoPage extends StatelessWidget {
           Expanded(
             child: Text(
               titulo,
-              style: const TextStyle(color: textoSecundario),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ),
           const SizedBox(width: 12),
@@ -4283,17 +5450,20 @@ class _EditarSerieDialogState extends State<EditarSerieDialog> {
   late final TextEditingController repeticoesController;
   late final TextEditingController cargaController;
   String? erro;
+  bool pesoCorporal = false;
 
   @override
   void initState() {
     super.initState();
+    pesoCorporal = widget.serie.pesoCorporal;
     repeticoesController = TextEditingController(
       text: '${widget.serie.repeticoesRealizadas}',
     );
+    final cargaExibida = PreferenciaUnidadeCarga.instancia.deKg(
+      widget.serie.cargaKg,
+    );
     cargaController = TextEditingController(
-      text: widget.serie.cargaKg.toStringAsFixed(
-        widget.serie.cargaKg % 1 == 0 ? 0 : 1,
-      ),
+      text: cargaExibida.toStringAsFixed(cargaExibida % 1 == 0 ? 0 : 1),
     );
   }
 
@@ -4322,7 +5492,13 @@ class _EditarSerieDialogState extends State<EditarSerieDialog> {
     }
 
     Navigator.of(context).pop(
-      widget.serie.copiar(repeticoesRealizadas: repeticoes, cargaKg: carga),
+      widget.serie.copiar(
+        repeticoesRealizadas: repeticoes,
+        cargaKg: pesoCorporal
+            ? 0
+            : PreferenciaUnidadeCarga.instancia.paraKg(carga),
+        pesoCorporal: pesoCorporal,
+      ),
     );
   }
 
@@ -4336,12 +5512,17 @@ class _EditarSerieDialogState extends State<EditarSerieDialog> {
           children: [
             Text(
               widget.serie.nomeExercicio,
-              style: const TextStyle(color: verde, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.primary,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
               'Meta: ${widget.serie.repeticoesPlanejadas} repetições',
-              style: const TextStyle(color: textoSecundario),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 16),
             TextField(
@@ -4355,14 +5536,24 @@ class _EditarSerieDialogState extends State<EditarSerieDialog> {
             const SizedBox(height: 12),
             TextField(
               controller: cargaController,
+              enabled: !pesoCorporal,
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
                 signed: false,
               ),
-              decoration: const InputDecoration(
-                labelText: 'Carga utilizada (kg)',
+              decoration: InputDecoration(
+                labelText:
+                    'Carga utilizada (${PreferenciaUnidadeCarga.instancia.rotulo})',
                 hintText: '0 para peso corporal ou não informado',
               ),
+            ),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Exercício com peso corporal'),
+              value: pesoCorporal,
+              onChanged: (valor) {
+                setState(() => pesoCorporal = valor ?? false);
+              },
             ),
             if (erro != null) ...[
               const SizedBox(height: 12),
@@ -4438,15 +5629,16 @@ class _BibliotecaExerciciosPageState extends State<BibliotecaExerciciosPage> {
 
   bool _jaCadastrado(ExercicioPredefinido exercicio) {
     final chave = _chave(exercicio);
+    final nomeNormalizado = exercicio.nome.trim().toLowerCase();
 
     return _adicionadosNestaSessao.contains(chave) ||
-        widget.exerciciosCadastrados.any(
-          (item) =>
-              item.nome.trim().toLowerCase() ==
-                  exercicio.nome.trim().toLowerCase() &&
+        widget.exerciciosCadastrados.any((item) {
+          final nomeExistente = item.nome.trim().toLowerCase();
+          return (nomeExistente == nomeNormalizado ||
+                  nomeExistente.startsWith('$nomeNormalizado (')) &&
               item.grupo.trim().toLowerCase() ==
-                  exercicio.grupo.trim().toLowerCase(),
-        );
+                  exercicio.grupo.trim().toLowerCase();
+        });
   }
 
   List<ExercicioPredefinido> get _exerciciosFiltrados {
@@ -4458,6 +5650,7 @@ class _BibliotecaExerciciosPageState extends State<BibliotecaExerciciosPage> {
 
       final termosBusca = [
         exercicio.nome,
+        exercicio.nomeOriginal,
         exercicio.grupo,
         exercicio.equipamento,
         exercicio.categoria,
@@ -4500,7 +5693,7 @@ class _BibliotecaExerciciosPageState extends State<BibliotecaExerciciosPage> {
         SnackBar(
           content: Text(
             sucesso
-                ? '${exercicio.nome} adicionado ao acervo!'
+                ? '${exercicio.nomeComNomeOriginal} adicionado ao acervo!'
                 : 'Esse exercício já está cadastrado.',
           ),
         ),
@@ -4545,7 +5738,7 @@ class _BibliotecaExerciciosPageState extends State<BibliotecaExerciciosPage> {
               ),
               const SizedBox(height: 20),
               Text(
-                exercicio.nome,
+                exercicio.nomeComNomeOriginal,
                 style: Theme.of(context).textTheme.headlineSmall
                     ?.copyWith(fontWeight: FontWeight.bold),
               ),
@@ -4577,7 +5770,9 @@ class _BibliotecaExerciciosPageState extends State<BibliotecaExerciciosPage> {
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(16),
                           child: Container(
-                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerHighest,
                             alignment: Alignment.center,
                             child: Image.asset(
                               caminho,
@@ -4587,7 +5782,10 @@ class _BibliotecaExerciciosPageState extends State<BibliotecaExerciciosPage> {
                                 return const Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    Icon(Icons.image_not_supported_outlined, size: 42),
+                                    Icon(
+                                      Icons.image_not_supported_outlined,
+                                      size: 42,
+                                    ),
                                     SizedBox(height: 8),
                                     Text('Imagem indisponível'),
                                   ],
@@ -4606,7 +5804,10 @@ class _BibliotecaExerciciosPageState extends State<BibliotecaExerciciosPage> {
                     'Deslize para ver as '
                     '${exercicio.caminhosImagensAssets.length} imagens do exercício',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(color: textoSecundario, fontSize: 12),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ],
@@ -4631,7 +5832,7 @@ class _BibliotecaExerciciosPageState extends State<BibliotecaExerciciosPage> {
               if (exercicio.instrucoes.isNotEmpty) ...[
                 const SizedBox(height: 20),
                 const Text(
-                  'Instruções originais',
+                  'Como executar',
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
@@ -4642,10 +5843,22 @@ class _BibliotecaExerciciosPageState extends State<BibliotecaExerciciosPage> {
                   ),
                 ),
               ],
+              Text(
+                'Use uma carga que permita manter o controle do movimento. '
+                'Interrompa se sentir dor e procure orientação profissional '
+                'para aprender variações técnicas.',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontSize: 12,
+                ),
+              ),
               const SizedBox(height: 20),
-              const Text(
+              Text(
                 'Dados: Free Exercise DB (Unlicense/public domain).',
-                style: TextStyle(color: textoSecundario, fontSize: 12),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontSize: 12,
+                ),
               ),
             ],
           ),
@@ -4754,7 +5967,9 @@ class _BibliotecaExerciciosPageState extends State<BibliotecaExerciciosPage> {
               alignment: Alignment.centerLeft,
               child: Text(
                 '${filtrados.length} de ${_catalogo.length} exercícios disponíveis',
-                style: const TextStyle(color: textoSecundario),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
           ),
@@ -4779,7 +5994,7 @@ class _BibliotecaExerciciosPageState extends State<BibliotecaExerciciosPage> {
                             child: Icon(Icons.fitness_center),
                           ),
                           title: Text(
-                            exercicio.nome,
+                            exercicio.nomeComNomeOriginal,
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                           subtitle: Text(

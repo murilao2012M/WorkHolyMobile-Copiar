@@ -1,6 +1,11 @@
-# Conectar o WorkHoly ao Firebase
+# Conectar o Moveria ao Firebase
 
 Projeto Firebase: `workholy-mobile`.
+
+O nome exibido do aplicativo é Moveria. O ID do projeto Firebase e o pacote
+Android abaixo são mantidos por enquanto para preservar a instalação e a
+integração existentes; não os altere sem planejar a migração do Firebase e da
+distribuição do aplicativo.
 
 ## No console Firebase
 
@@ -24,7 +29,7 @@ Instalar Node.js 20 LTS e, depois, executar no PowerShell:
 npm install -g firebase-tools
 dart pub global activate flutterfire_cli
 firebase login
-Set-Location "C:\Users\TI\WorkHolyMobile"
+Set-Location "<caminho-do-projeto>"
 flutterfire configure --project=workholy-mobile --platforms=android
 ```
 

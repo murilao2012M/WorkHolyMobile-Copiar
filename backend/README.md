@@ -1,4 +1,4 @@
-# Backend do WorkHoly
+# Backend do Moveria
 
 Este diretório contém a base para autenticação, licença Premium e sincronização
 das compras do Google Play. Nenhuma credencial deve ser adicionada ao Git.
