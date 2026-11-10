@@ -9,6 +9,7 @@ class AutenticacaoPage extends StatefulWidget {
 }
 
 class _AutenticacaoPageState extends State<AutenticacaoPage> {
+  final _nome = TextEditingController();
   final _email = TextEditingController();
   final _senha = TextEditingController();
   final _form = GlobalKey<FormState>();
@@ -18,6 +19,7 @@ class _AutenticacaoPageState extends State<AutenticacaoPage> {
 
   @override
   void dispose() {
+    _nome.dispose();
     _email.dispose();
     _senha.dispose();
     super.dispose();
@@ -30,32 +32,56 @@ class _AutenticacaoPageState extends State<AutenticacaoPage> {
         : 'Informe um e-mail válido.';
   }
 
+  // Política aplicada só no cadastro, para não bloquear contas já existentes.
+  String? _validarSenhaForte(String? valor) {
+    final senha = valor ?? '';
+    final ok =
+        senha.length >= 10 &&
+        RegExp(r'[a-z]').hasMatch(senha) &&
+        RegExp(r'[A-Z]').hasMatch(senha) &&
+        RegExp(r'\d').hasMatch(senha);
+    return ok
+        ? null
+        : 'Use ao menos 10 caracteres, com maiúscula, minúscula e número.';
+  }
+
+  String? _validarNome(String? valor) {
+    final nome = valor?.trim() ?? '';
+    return nome.length >= 2 ? null : 'Informe como podemos chamar você.';
+  }
+
   Future<void> _enviar() async {
     if (!_form.currentState!.validate()) return;
+    final nome = _nome.text.trim();
+    final email = _email.text.trim();
+    final senha = _senha.text;
+    final criandoConta = _criandoConta;
     setState(() => _enviando = true);
     try {
       final auth = FirebaseAuth.instance;
-      if (_criandoConta) {
+      if (criandoConta) {
         final credencial = await auth.createUserWithEmailAndPassword(
-          email: _email.text.trim(),
-          password: _senha.text,
+          email: email,
+          password: senha,
         );
-        await credencial.user?.sendEmailVerification();
+        final usuario = credencial.user;
+        if (usuario == null) {
+          throw FirebaseAuthException(code: 'signup-user-missing');
+        }
+        await usuario.updateDisplayName(nome);
+        await usuario.sendEmailVerification();
         if (mounted) {
           _mensagem('Conta criada. Confirme o e-mail enviado para continuar.');
         }
       } else {
-        await auth.signInWithEmailAndPassword(
-          email: _email.text.trim(),
-          password: _senha.text,
-        );
+        await auth.signInWithEmailAndPassword(email: email, password: senha);
       }
     } on FirebaseAuthException catch (erro) {
       final texto = switch (erro.code) {
         'email-already-in-use' => 'Este e-mail já possui uma conta.',
         'invalid-credential' ||
         'wrong-password' => 'E-mail ou senha incorretos.',
-        'weak-password' => 'A senha deve ter pelo menos 6 caracteres.',
+        'weak-password' => 'Senha fraca. Use ao menos 10 caracteres.',
         'user-not-found' => 'Nenhuma conta encontrada para este e-mail.',
         'too-many-requests' => 'Muitas tentativas. Aguarde e tente novamente.',
         _ => 'Não foi possível concluir. Tente novamente.',
@@ -120,6 +146,19 @@ class _AutenticacaoPageState extends State<AutenticacaoPage> {
                   ),
                 ),
                 const SizedBox(height: 30),
+                if (_criandoConta) ...[
+                  TextFormField(
+                    controller: _nome,
+                    validator: _validarNome,
+                    textCapitalization: TextCapitalization.words,
+                    autofillHints: const [AutofillHints.name],
+                    decoration: const InputDecoration(
+                      labelText: 'Como podemos chamar você?',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                ],
                 TextFormField(
                   controller: _email,
                   validator: _validarEmail,
@@ -134,9 +173,9 @@ class _AutenticacaoPageState extends State<AutenticacaoPage> {
                 TextFormField(
                   controller: _senha,
                   obscureText: _ocultarSenha,
-                  validator: (v) => (v?.length ?? 0) >= 6
-                      ? null
-                      : 'A senha deve ter ao menos 6 caracteres.',
+                  validator: (v) => _criandoConta
+                      ? _validarSenhaForte(v)
+                      : ((v?.isEmpty ?? true) ? 'Informe sua senha.' : null),
                   autofillHints: const [AutofillHints.password],
                   decoration: InputDecoration(
                     labelText: 'Senha',

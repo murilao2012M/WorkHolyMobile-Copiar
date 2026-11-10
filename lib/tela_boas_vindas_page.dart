@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 
 class TelaBoasVindasPage extends StatelessWidget {
-  const TelaBoasVindasPage({super.key, required this.onComecar});
+  const TelaBoasVindasPage({super.key, required this.onComecar, this.nome});
 
   final VoidCallback onComecar;
+  final String? nome;
 
   @override
   Widget build(BuildContext context) {
@@ -20,13 +21,20 @@ class TelaBoasVindasPage extends StatelessWidget {
                 width: 112,
                 height: 112,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFB7F34A),
+                  color: const Color(0xFFC6F432),
                   borderRadius: BorderRadius.circular(32),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF7C5CFF).withValues(alpha: 0.45),
+                      blurRadius: 40,
+                      spreadRadius: 2,
+                    ),
+                  ],
                 ),
                 child: const Icon(
                   Icons.fitness_center,
                   size: 58,
-                  color: Color(0xFF10120F),
+                  color: Color(0xFF0A0B10),
                 ),
               ),
               const SizedBox(height: 28),
@@ -41,7 +49,9 @@ class TelaBoasVindasPage extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               Text(
-                'Seu treino. Sua evolução.',
+                nome == null || nome!.trim().isEmpty
+                    ? 'Seu treino. Sua evolução.'
+                    : '${nome!.trim()}, seu treino. Sua evolução.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 21,

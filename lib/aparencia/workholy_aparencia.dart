@@ -17,7 +17,7 @@ class WorkHolyAparencia extends ChangeNotifier {
   bool get carregado => _carregado;
 
   static const List<Color> cores = [
-    Color(0xFFB7F34A), // Verde-limão
+    Color(0xFFC6F432), // Verde-limão
     Color(0xFF42A5F5), // Azul
     Color(0xFFAB7CFF), // Roxo
     Color(0xFFFF5252), // Vermelho
@@ -69,14 +69,14 @@ class WorkHolyAparencia extends ChangeNotifier {
     final destaque = corDestaque;
 
     final fundoTema = escuro
-        ? const Color(0xFF10120F)
+        ? const Color(0xFF0A0B10)
         : const Color(0xFFF5F6F2);
 
-    final superficieTema = escuro ? const Color(0xFF1B1E19) : Colors.white;
+    final superficieTema = escuro ? const Color(0xFF12141A) : Colors.white;
 
     final textoPrincipal = escuro ? Colors.white : const Color(0xFF20231D);
 
-    final borda = escuro ? Colors.white12 : const Color(0xFFDDE1D7);
+    final borda = escuro ? const Color(0xFF262A33) : const Color(0xFFDDE1D7);
 
     final scheme = ColorScheme.fromSeed(
       seedColor: destaque,
@@ -92,24 +92,42 @@ class WorkHolyAparencia extends ChangeNotifier {
       scaffoldBackgroundColor: fundoTema,
       cardColor: superficieTema,
       dividerColor: borda,
-      cardTheme: CardThemeData(
-        color: superficieTema,
-        surfaceTintColor: Colors.transparent,
-      ),
-      textTheme: Typography.material2021(
-        platform: TargetPlatform.android,
-      ).black.apply(
-        bodyColor: textoPrincipal,
-        displayColor: textoPrincipal,
-      ),
+      textTheme: Typography.material2021(platform: TargetPlatform.android).black
+          .apply(bodyColor: textoPrincipal, displayColor: textoPrincipal),
       appBarTheme: AppBarTheme(
         backgroundColor: fundoTema,
         foregroundColor: textoPrincipal,
         centerTitle: false,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        titleTextStyle: TextStyle(
+          color: textoPrincipal,
+          fontSize: 20,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.2,
+        ),
       ),
+      cardTheme: CardThemeData(
+        color: superficieTema,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        margin: const EdgeInsets.only(bottom: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: borda),
+        ),
+      ),
+      listTileTheme: ListTileThemeData(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      dividerTheme: DividerThemeData(color: borda, thickness: 1, space: 1),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: superficieTema,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),

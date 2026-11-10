@@ -1,0 +1,14 @@
+{
+  "origem_total": 1324,
+  "candidatos": 910,
+  "processados": 910,
+  "pendentes": 0,
+  "falhas_desta_execucao": [],
+  "duracao_segundos": 2163.4,
+  "arquivos": [
+    "C:\\Users\\TI\\WorkHolyMobile\\assets\\exercicios\\staging_dataset_complementar\\exercicios_argos_complementares.json",
+    "C:\\Users\\TI\\WorkHolyMobile\\assets\\exercicios\\staging_dataset_complementar\\traducoes_argos_complementares_pt_BR.json"
+  ],
+  "catalogo_ativo_alterado": false,
+  "revisao_humana_necessaria": true
+}

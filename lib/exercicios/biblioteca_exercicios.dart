@@ -18,6 +18,12 @@ class ExercicioPredefinido {
     this.mecanica = '',
     this.equipamento = '',
     this.categoria = '',
+    this.equipamentoOriginal = '',
+    this.categoriaOriginal = '',
+    this.nivelOriginal = '',
+    this.mecanicaOriginal = '',
+    this.instrucoesOriginais = const [],
+    this.musculosPrimariosOriginais = const [],
     this.series = 3,
     this.repeticoes = 12,
   });
@@ -31,6 +37,12 @@ class ExercicioPredefinido {
   final String mecanica;
   final String equipamento;
   final String categoria;
+  final String equipamentoOriginal;
+  final String categoriaOriginal;
+  final String nivelOriginal;
+  final String mecanicaOriginal;
+  final List<String> instrucoesOriginais;
+  final List<String> musculosPrimariosOriginais;
   final List<String> musculosPrimarios;
   final List<String> musculosSecundarios;
   final List<String> instrucoes;
@@ -45,6 +57,22 @@ class ExercicioPredefinido {
       return nome;
     }
     return '$nome ($original)';
+  }
+
+  String get equipamentoParaFiltro {
+    final valor = equipamento.trim();
+    switch (valor.toLowerCase()) {
+      case 'body only':
+      case 'body weight':
+        return 'Peso corporal';
+      case 'kettlebell':
+      case 'kettlebells':
+        return 'Kettlebell';
+      case '':
+        return 'Não informado';
+      default:
+        return valor;
+    }
   }
 
   /// Prefixo dos arquivos de imagem locais.
@@ -103,6 +131,12 @@ class ExercicioPredefinido {
       id: id,
       nome: nome,
       nomeOriginal: nomeOriginal,
+      equipamentoOriginal: dados['equipment']?.toString() ?? '',
+      categoriaOriginal: dados['category']?.toString() ?? '',
+      nivelOriginal: dados['level']?.toString() ?? '',
+      mecanicaOriginal: dados['mechanic']?.toString() ?? '',
+      instrucoesOriginais: _listaDeTextos(dados['instructions']),
+      musculosPrimariosOriginais: musculosOriginais,
       grupo: _grupoEmPortugues(musculosOriginais),
       forca: dados['force']?.toString() ?? '',
       nivel: _traduzirCampo(campos['nivel'], dados['level']),

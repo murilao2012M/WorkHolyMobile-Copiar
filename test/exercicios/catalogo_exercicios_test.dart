@@ -41,7 +41,7 @@ void main() {
     ]);
   });
 
-  test('carrega os 876 exercícios com traduções e IDs preservados', () async {
+  test('carrega os 1.786 exercícios com traduções e IDs preservados', () async {
     final catalogo = await CatalogoExercicios.instancia.carregar();
 
     final catalogoOriginalJson = await rootBundle.loadString(
@@ -57,8 +57,23 @@ void main() {
     final traducoesPorId = (traducoes['exercicios'] as Map)
         .cast<String, dynamic>();
 
-    expect(originais, hasLength(876));
-    expect(catalogo, hasLength(876));
+    expect(originais, hasLength(1786));
+    expect(catalogo, hasLength(1786));
+    expect(catalogo.map((exercicio) => exercicio.id).toSet(), hasLength(1786));
+    for (final entrada in {
+      'Peso corporal': 334,
+      'Kettlebell': 87,
+      'Halteres': 397,
+      'Não informado': 77,
+    }.entries) {
+      expect(
+        catalogo.where(
+          (exercicio) => exercicio.equipamentoParaFiltro == entrada.key,
+        ),
+        hasLength(entrada.value),
+        reason: entrada.key,
+      );
+    }
 
     final originaisPorId = {
       for (final item in originais) item['id'].toString(): item,
@@ -70,7 +85,7 @@ void main() {
     expect(carregadosPorId.keys.toSet(), originaisPorId.keys.toSet());
     expect(
       originais.where((item) => (item['instructions'] as List).isNotEmpty),
-      hasLength(871),
+      hasLength(1781),
     );
 
     for (final exercicio in catalogo) {
@@ -120,7 +135,12 @@ void main() {
       );
       expect(
         traducao['status_instrucoes'],
-        anyOf('traduzido_automaticamente_revisao_tecnica', 'corrigido_manual'),
+        anyOf(
+          'revisada',
+          'revisao_humana',
+          'traduzido_automaticamente_revisao_tecnica',
+          'corrigido_manual',
+        ),
         reason: 'Status ausente no exercício ${exercicio.id}',
       );
     }

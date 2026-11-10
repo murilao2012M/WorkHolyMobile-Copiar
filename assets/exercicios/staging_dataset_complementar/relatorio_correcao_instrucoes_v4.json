@@ -1,0 +1,12 @@
+{
+  "data_execucao": "2026-10-27T13:10:34",
+  "arquivo_entrada": "assets\\exercicios\\staging_dataset_complementar\\traducoes_argos_complementares_pt_BR_corrigidas_v3.json",
+  "arquivo_saida": "assets\\exercicios\\staging_dataset_complementar\\traducoes_argos_complementares_pt_BR_corrigidas_v4.json",
+  "total_exercicios": 910,
+  "total_instrucoes_analisadas": 5325,
+  "instrucoes_com_alteracao": 0,
+  "alteracoes": [],
+  "catalogo_ativo_modificado": false,
+  "arquivos_rapidapi_modificados": false,
+  "revisao_humana_necessaria": true
+}

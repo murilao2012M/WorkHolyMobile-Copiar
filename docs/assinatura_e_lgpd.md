@@ -54,7 +54,9 @@ Antes de produção, publicar Política de Privacidade e Termos contendo:
 - procedimento de incidentes e atualização da política.
 
 Implementar também uma função autenticada de exclusão de conta: apagar ou
-anonimizar `users`, `health_data` e dados de perfil; preservar somente
+anonimizar `users`, `health_data`, dados de perfil e todas as versões e partes
+de `workholy_backups` (subcoleções não são apagadas automaticamente ao excluir
+o documento pai); preservar somente
 registros fiscais/antifraude estritamente necessários pelo prazo legal, com
 acesso administrativo auditado.
 

@@ -1,0 +1,490 @@
+import 'package:flutter/material.dart' hide Icon;
+
+import '../painel/w_icone.dart';
+
+import '../sincronizacao/sincronizacao_usuario.dart';
+import 'recorde_pessoal.dart';
+
+// Modelo de exercício usado pela tela de recordes, sem dependência de main.dart.
+class RecordeExercicio {
+  const RecordeExercicio({required this.id, required this.nome});
+
+  final String id;
+  final String nome;
+}
+
+const Color _rpVerde = Color(0xFFC6F432);
+const Color _rpTextoSecundario = Color(0xFF9AA0AB);
+
+class RecordesPessoaisPage extends StatefulWidget {
+  const RecordesPessoaisPage({super.key, required this.exercicios});
+
+  final List<RecordeExercicio> exercicios;
+
+  @override
+  State<RecordesPessoaisPage> createState() => _RecordesPessoaisPageState();
+}
+
+class _RecordesPessoaisPageState extends State<RecordesPessoaisPage> {
+  List<RecordePessoal> _recordes = [];
+  bool _carregando = true;
+  bool _salvando = false;
+  String? _exercicioFiltro;
+
+  @override
+  void initState() {
+    super.initState();
+    _carregar();
+  }
+
+  Future<void> _carregar() async {
+    try {
+      final dados = await RecordesPessoaisBanco.instancia.listar(
+        exercicioId: _exercicioFiltro,
+      );
+      if (!mounted) return;
+      setState(() {
+        _recordes = dados;
+        _carregando = false;
+      });
+    } catch (erro) {
+      if (!mounted) return;
+      setState(() => _carregando = false);
+      _mensagem('Não foi possível carregar os recordes.');
+      debugPrint('Erro ao carregar RP: $erro');
+    }
+  }
+
+  void _mensagem(String texto) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(texto)));
+  }
+
+  Future<void> _novoRecorde() async {
+    if (widget.exercicios.isEmpty) {
+      _mensagem('Cadastre um exercício antes de registrar um RP.');
+      return;
+    }
+
+    final resultado = await showDialog<_NovoRecorde>(
+      context: context,
+      builder: (_) => _FormularioRecorde(exercicios: widget.exercicios),
+    );
+
+    if (resultado == null) return;
+
+    setState(() => _salvando = true);
+    try {
+      await RecordesPessoaisBanco.instancia.salvarManual(
+        exercicioId: resultado.exercicio.id,
+        nomeExercicio: resultado.exercicio.nome,
+        tipo: resultado.tipo,
+        valor: resultado.valor,
+        data: resultado.data,
+        observacao: resultado.observacao,
+      );
+
+      SincronizacaoUsuario.instancia.agendarEnvio();
+      await _carregar();
+      if (mounted) _mensagem('Recorde pessoal salvo!');
+    } catch (erro) {
+      _mensagem('Não foi possível salvar o recorde.');
+      debugPrint('Erro ao salvar RP manual: $erro');
+    } finally {
+      if (mounted) setState(() => _salvando = false);
+    }
+  }
+
+  Future<void> _excluir(RecordePessoal recorde) async {
+    if (recorde.origem != OrigemRecordePessoal.manual) return;
+
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Excluir recorde?'),
+        content: Text('Deseja excluir o registro de ${recorde.nomeExercicio}?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar != true) return;
+
+    try {
+      await RecordesPessoaisBanco.instancia.excluir(recorde.id);
+      SincronizacaoUsuario.instancia.agendarEnvio();
+      await _carregar();
+      if (mounted) _mensagem('Registro manual excluído.');
+    } catch (erro) {
+      _mensagem('Não foi possível excluir o registro.');
+      debugPrint('Erro ao excluir RP: $erro');
+    }
+  }
+
+  String _formatarData(DateTime data) {
+    final dia = data.day.toString().padLeft(2, '0');
+    final mes = data.month.toString().padLeft(2, '0');
+    return '$dia/$mes/${data.year}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Recordes pessoais'),
+        actions: [
+          IconButton(
+            tooltip: 'Atualizar',
+            onPressed: _carregar,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _salvando ? null : _novoRecorde,
+        icon: const Icon(Icons.add),
+        label: const Text('Registrar RP'),
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: DropdownButtonFormField<String?>(
+              initialValue: _exercicioFiltro,
+              decoration: const InputDecoration(
+                labelText: 'Filtrar por exercício',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.filter_list),
+              ),
+              items: [
+                const DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text('Todos os exercícios'),
+                ),
+                ...widget.exercicios.map(
+                  (exercicio) => DropdownMenuItem<String?>(
+                    value: exercicio.id,
+                    child: Text(
+                      exercicio.nome,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ],
+              onChanged: (valor) {
+                setState(() {
+                  _exercicioFiltro = valor;
+                  _carregando = true;
+                });
+                _carregar();
+              },
+            ),
+          ),
+          Expanded(
+            child: _carregando
+                ? const Center(child: CircularProgressIndicator())
+                : _recordes.isEmpty
+                ? _estadoVazio()
+                : RefreshIndicator(
+                    onRefresh: _carregar,
+                    child: ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+                      itemCount: _recordes.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 8),
+                      itemBuilder: (context, indice) {
+                        final recorde = _recordes[indice];
+                        final automatico =
+                            recorde.origem == OrigemRecordePessoal.automatico;
+
+                        return Card(
+                          child: ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: _rpVerde.withValues(alpha: 0.15),
+                              child: Icon(
+                                recorde.tipo == TipoRecordePessoal.cargaMaxima
+                                    ? Icons.fitness_center
+                                    : Icons.repeat,
+                                color: _rpVerde,
+                              ),
+                            ),
+                            title: Text(
+                              recorde.nomeExercicio,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const SizedBox(height: 4),
+                                Text(recorde.descricaoTipo),
+                                Text(
+                                  '${_formatarData(recorde.data)} · '
+                                  '${automatico ? 'Automático' : 'Manual'}',
+                                  style: const TextStyle(
+                                    color: _rpTextoSecundario,
+                                  ),
+                                ),
+                                if (recorde.observacao.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Text(recorde.observacao),
+                                  ),
+                              ],
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      recorde.valor.toStringAsFixed(
+                                        recorde.valor % 1 == 0 ? 0 : 1,
+                                      ),
+                                      style: const TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    Text(
+                                      recorde.unidade,
+                                      style: const TextStyle(fontSize: 11),
+                                    ),
+                                  ],
+                                ),
+                                if (!automatico)
+                                  IconButton(
+                                    tooltip: 'Excluir registro manual',
+                                    onPressed: () => _excluir(recorde),
+                                    icon: const Icon(Icons.delete_outline),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _estadoVazio() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.emoji_events_outlined, size: 64, color: _rpVerde),
+            const SizedBox(height: 16),
+            const Text(
+              'Seu próximo recorde começa aqui',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Registre um RP manualmente ou conclua um treino '
+              'com uma nova marca para que o aplicativo identifique '
+              'um recorde automaticamente.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: _rpTextoSecundario),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NovoRecorde {
+  final RecordeExercicio exercicio;
+  final TipoRecordePessoal tipo;
+  final double valor;
+  final DateTime data;
+  final String observacao;
+
+  const _NovoRecorde({
+    required this.exercicio,
+    required this.tipo,
+    required this.valor,
+    required this.data,
+    required this.observacao,
+  });
+}
+
+class _FormularioRecorde extends StatefulWidget {
+  const _FormularioRecorde({required this.exercicios});
+
+  final List<RecordeExercicio> exercicios;
+
+  @override
+  State<_FormularioRecorde> createState() => _FormularioRecordeState();
+}
+
+class _FormularioRecordeState extends State<_FormularioRecorde> {
+  final _formKey = GlobalKey<FormState>();
+  final _valorController = TextEditingController();
+  final _observacaoController = TextEditingController();
+
+  late RecordeExercicio _exercicio;
+  TipoRecordePessoal _tipo = TipoRecordePessoal.cargaMaxima;
+  DateTime _data = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    _exercicio = widget.exercicios.first;
+  }
+
+  @override
+  void dispose() {
+    _valorController.dispose();
+    _observacaoController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _selecionarData() async {
+    final data = await showDatePicker(
+      context: context,
+      initialDate: _data,
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now(),
+    );
+    if (data != null && mounted) setState(() => _data = data);
+  }
+
+  void _salvar() {
+    if (!_formKey.currentState!.validate()) return;
+
+    final valor = double.parse(
+      _valorController.text.trim().replaceAll(',', '.'),
+    );
+
+    Navigator.pop(
+      context,
+      _NovoRecorde(
+        exercicio: _exercicio,
+        tipo: _tipo,
+        valor: valor,
+        data: _data,
+        observacao: _observacaoController.text.trim(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Registrar recorde pessoal'),
+      content: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<RecordeExercicio>(
+                initialValue: _exercicio,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Exercício'),
+                items: widget.exercicios.map((exercicio) {
+                  return DropdownMenuItem(
+                    value: exercicio,
+                    child: Text(
+                      exercicio.nome,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  );
+                }).toList(),
+                onChanged: (valor) {
+                  if (valor != null) setState(() => _exercicio = valor);
+                },
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<TipoRecordePessoal>(
+                initialValue: _tipo,
+                decoration: const InputDecoration(labelText: 'Tipo de recorde'),
+                items: const [
+                  DropdownMenuItem(
+                    value: TipoRecordePessoal.cargaMaxima,
+                    child: Text('Maior carga (kg)'),
+                  ),
+                  DropdownMenuItem(
+                    value: TipoRecordePessoal.repeticoesMaximas,
+                    child: Text('Mais repetições'),
+                  ),
+                ],
+                onChanged: (valor) {
+                  if (valor != null) setState(() => _tipo = valor);
+                },
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _valorController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: InputDecoration(
+                  labelText: _tipo == TipoRecordePessoal.cargaMaxima
+                      ? 'Carga em kg'
+                      : 'Quantidade de repetições',
+                ),
+                validator: (texto) {
+                  final valor = double.tryParse(
+                    (texto ?? '').trim().replaceAll(',', '.'),
+                  );
+                  if (valor == null || !valor.isFinite || valor <= 0) {
+                    return 'Informe um valor maior que zero.';
+                  }
+                  if (_tipo == TipoRecordePessoal.repeticoesMaximas &&
+                      valor != valor.roundToDouble()) {
+                    return 'Use um número inteiro de repetições.';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.calendar_month),
+                title: const Text('Data do recorde'),
+                subtitle: Text(
+                  '${_data.day.toString().padLeft(2, '0')}/'
+                  '${_data.month.toString().padLeft(2, '0')}/'
+                  '${_data.year}',
+                ),
+                onTap: _selecionarData,
+              ),
+              TextFormField(
+                controller: _observacaoController,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Observação (opcional)',
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(onPressed: _salvar, child: const Text('Salvar recorde')),
+      ],
+    );
+  }
+}

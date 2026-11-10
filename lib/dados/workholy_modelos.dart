@@ -1,3 +1,5 @@
+import '../workfit/workfit_ciclo.dart';
+
 int _contadorIds = 0;
 
 String novoId(String prefixo) {
@@ -20,6 +22,7 @@ class Treino {
 
   // Campo mantido para compatibilidade com os dados antigos.
   final int exercicios;
+  final WorkFitCiclo? workfitCiclo;
 
   Treino({
     String? id,
@@ -30,6 +33,7 @@ class Treino {
     List<int> diasSemana = const [],
     this.anotacoes = '',
     this.exercicios = 0,
+    this.workfitCiclo,
   }) : id = id ?? novoId('treino'),
        diasSemana = List<int>.unmodifiable(
          diasSemana.where((dia) => dia >= 1 && dia <= 7).toSet().toList()
@@ -45,6 +49,7 @@ class Treino {
     List<int>? diasSemana,
     String? anotacoes,
     int? exercicios,
+    WorkFitCiclo? workfitCiclo,
   }) => Treino(
     id: id ?? this.id,
     nome: nome ?? this.nome,
@@ -54,6 +59,7 @@ class Treino {
     diasSemana: diasSemana ?? this.diasSemana,
     anotacoes: anotacoes ?? this.anotacoes,
     exercicios: exercicios ?? this.exercicios,
+    workfitCiclo: workfitCiclo ?? this.workfitCiclo,
   );
 
   Map<String, dynamic> toJson() => {
@@ -65,6 +71,7 @@ class Treino {
     'diasSemana': diasSemana,
     'anotacoes': anotacoes,
     'exercicios': exercicios,
+    if (workfitCiclo != null) 'workfitCiclo': workfitCiclo!.toJson(),
   };
 
   factory Treino.fromJson(Map<String, dynamic> json) {
@@ -84,6 +91,11 @@ class Treino {
           : const [],
       anotacoes: json['anotacoes']?.toString() ?? '',
       exercicios: (json['exercicios'] as num?)?.toInt() ?? 0,
+      workfitCiclo: json['workfitCiclo'] == null
+          ? null
+          : WorkFitCiclo.fromJson(
+              Map<String, dynamic>.from(json['workfitCiclo'] as Map),
+            ),
     );
   }
 }
@@ -95,6 +107,7 @@ class Exercicio {
   final int series;
   final int repeticoes;
   final String anotacoes;
+  final String? catalogoId;
 
   Exercicio({
     String? id,
@@ -103,6 +116,7 @@ class Exercicio {
     required this.series,
     required this.repeticoes,
     this.anotacoes = '',
+    this.catalogoId,
   }) : id = id ?? novoId('exercicio');
 
   Map<String, dynamic> toJson() => {
@@ -112,6 +126,7 @@ class Exercicio {
     'series': series,
     'repeticoes': repeticoes,
     'anotacoes': anotacoes,
+    if (catalogoId != null) 'catalogoId': catalogoId,
   };
 
   factory Exercicio.fromJson(Map<String, dynamic> json) {
@@ -122,6 +137,7 @@ class Exercicio {
       series: (json['series'] as num?)?.toInt() ?? 3,
       repeticoes: (json['repeticoes'] as num?)?.toInt() ?? 12,
       anotacoes: json['anotacoes']?.toString() ?? '',
+      catalogoId: json['catalogoId'] as String?,
     );
   }
 }
@@ -140,6 +156,9 @@ class ItemTreino {
   final String instrucoes;
   final double? metaCargaKg;
   final int? metaRepeticoes;
+  final bool progressaoAtiva;
+  final String? workfitUltimaSessaoAjustada;
+  final String? workfitCicloRecuperado;
 
   ItemTreino({
     String? id,
@@ -153,6 +172,9 @@ class ItemTreino {
     this.instrucoes = '',
     this.metaCargaKg,
     this.metaRepeticoes,
+    this.progressaoAtiva = true,
+    this.workfitUltimaSessaoAjustada,
+    this.workfitCicloRecuperado,
   }) : id = id ?? novoId('item');
 
   Map<String, dynamic> toJson() => {
@@ -167,6 +189,11 @@ class ItemTreino {
     'instrucoes': instrucoes,
     'metaCargaKg': metaCargaKg,
     'metaRepeticoes': metaRepeticoes,
+    'progressaoAtiva': progressaoAtiva,
+    if (workfitUltimaSessaoAjustada != null)
+      'workfitUltimaSessaoAjustada': workfitUltimaSessaoAjustada,
+    if (workfitCicloRecuperado != null)
+      'workfitCicloRecuperado': workfitCicloRecuperado,
   };
 
   factory ItemTreino.fromJson(Map<String, dynamic> json) {
@@ -182,6 +209,10 @@ class ItemTreino {
       instrucoes: json['instrucoes']?.toString() ?? '',
       metaCargaKg: (json['metaCargaKg'] as num?)?.toDouble(),
       metaRepeticoes: (json['metaRepeticoes'] as num?)?.toInt(),
+      progressaoAtiva: json['progressaoAtiva'] as bool? ?? true,
+      workfitUltimaSessaoAjustada:
+          json['workfitUltimaSessaoAjustada'] as String?,
+      workfitCicloRecuperado: json['workfitCicloRecuperado'] as String?,
     );
   }
 }
@@ -200,6 +231,7 @@ class SerieExecutada {
   final String instrucoes;
   final double? metaCargaKg;
   final int? metaRepeticoes;
+  final String? catalogoId;
 
   const SerieExecutada({
     required this.id,
@@ -215,6 +247,7 @@ class SerieExecutada {
     this.instrucoes = '',
     this.metaCargaKg,
     this.metaRepeticoes,
+    this.catalogoId,
   });
 
   SerieExecutada copiar({
@@ -222,6 +255,7 @@ class SerieExecutada {
     double? cargaKg,
     bool? concluida,
     bool? pesoCorporal,
+    String? catalogoId,
   }) {
     return SerieExecutada(
       id: id,
@@ -237,6 +271,7 @@ class SerieExecutada {
       instrucoes: instrucoes,
       metaCargaKg: metaCargaKg,
       metaRepeticoes: metaRepeticoes,
+      catalogoId: catalogoId ?? this.catalogoId,
     );
   }
 
@@ -254,6 +289,7 @@ class SerieExecutada {
     'instrucoes': instrucoes,
     'metaCargaKg': metaCargaKg,
     'metaRepeticoes': metaRepeticoes,
+    if (catalogoId != null) 'catalogoId': catalogoId,
   };
 
   factory SerieExecutada.fromJson(Map<String, dynamic> json) {
@@ -273,6 +309,7 @@ class SerieExecutada {
       instrucoes: json['instrucoes']?.toString() ?? '',
       metaCargaKg: (json['metaCargaKg'] as num?)?.toDouble(),
       metaRepeticoes: (json['metaRepeticoes'] as num?)?.toInt(),
+      catalogoId: json['catalogoId'] as String?,
     );
   }
 }
@@ -286,6 +323,9 @@ class SessaoTreino {
   final List<SerieExecutada> series;
   final String anotacoes;
   final String? alunoId;
+  final String? workfitPlanoId;
+  final int? rpe;
+  final int? rir;
 
   const SessaoTreino({
     required this.id,
@@ -296,6 +336,9 @@ class SessaoTreino {
     required this.series,
     this.anotacoes = '',
     this.alunoId,
+    this.workfitPlanoId,
+    this.rpe,
+    this.rir,
   });
 
   bool get finalizada => fim != null;
@@ -308,6 +351,8 @@ class SessaoTreino {
     List<SerieExecutada>? series,
     String? anotacoes,
     String? alunoId,
+    int? rpe,
+    int? rir,
   }) {
     return SessaoTreino(
       id: id,
@@ -318,6 +363,9 @@ class SessaoTreino {
       series: series ?? List<SerieExecutada>.from(this.series),
       anotacoes: anotacoes ?? this.anotacoes,
       alunoId: alunoId ?? this.alunoId,
+      workfitPlanoId: workfitPlanoId,
+      rpe: rpe ?? this.rpe,
+      rir: rir ?? this.rir,
     );
   }
 
@@ -330,6 +378,9 @@ class SessaoTreino {
     'series': series.map((serie) => serie.toJson()).toList(),
     'anotacoes': anotacoes,
     'alunoId': alunoId,
+    if (workfitPlanoId != null) 'workfitPlanoId': workfitPlanoId,
+    if (rpe != null) 'rpe': rpe,
+    if (rir != null) 'rir': rir,
   };
 
   factory SessaoTreino.fromJson(Map<String, dynamic> json) {
@@ -356,6 +407,12 @@ class SessaoTreino {
       }
       return SerieExecutada.fromJson(Map<String, dynamic>.from(item));
     }).toList();
+    final rpe = json['rpe'];
+    final rir = json['rir'];
+    if ((rpe != null && (rpe is! int || rpe < 1 || rpe > 10)) ||
+        (rir != null && (rir is! int || rir < 0 || rir > 10))) {
+      throw const FormatException('Esforço da sessão inválido.');
+    }
 
     return SessaoTreino(
       id: json['id']?.toString() ?? novoId('sessao'),
@@ -366,6 +423,9 @@ class SessaoTreino {
       series: dadosSeries,
       anotacoes: json['anotacoes']?.toString() ?? '',
       alunoId: json['alunoId']?.toString(),
+      workfitPlanoId: json['workfitPlanoId'] as String?,
+      rpe: rpe as int?,
+      rir: rir as int?,
     );
   }
 }

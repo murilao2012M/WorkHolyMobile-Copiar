@@ -21,10 +21,10 @@ class PlanoPremiumPage extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           const Text(
-            'Evolua com o Premium',
-            style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+            'Todos os recursos liberados!',
+            style: TextStyle(fontSize: 27, fontWeight: FontWeight.bold),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           Text(
             recurso == null
                 ? 'Desbloqueie os recursos avançados do Moveria.'
@@ -60,23 +60,17 @@ class PlanoPremiumPage extends StatelessWidget {
                   _Beneficio('Metas pessoais com prazo'),
                   _Beneficio('Avaliações físicas com histórico'),
                   _Beneficio('Gráficos de desempenho e evolução'),
+                  _Beneficio('Todos os recursos de treinamento'),
+                  _Beneficio('WorkFit e recursos disponíveis no aplicativo'),
                 ],
               ),
             ),
           ),
           const SizedBox(height: 24),
           FilledButton.icon(
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'A assinatura será liberada quando o app estiver no Google Play.',
-                  ),
-                ),
-              );
-            },
-            icon: const Icon(Icons.play_arrow),
-            label: const Text('Disponível em breve no Google Play'),
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.check_circle_outline),
+            label: const Text('Aproveitar recursos gratuitos'),
             style: FilledButton.styleFrom(
               backgroundColor: cores.primary,
               foregroundColor: cores.onPrimary,
@@ -97,11 +91,12 @@ class PlanoPremiumPage extends StatelessWidget {
 
 class _Beneficio extends StatelessWidget {
   const _Beneficio(this.texto);
+
   final String texto;
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 10),
+    padding: const EdgeInsets.only(bottom: 12),
     child: Row(
       children: [
         Icon(

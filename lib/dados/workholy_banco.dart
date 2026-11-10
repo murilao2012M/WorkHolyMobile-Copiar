@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../alunos/alunos_modelos.dart';
+import '../sincronizacao/controle_alteracoes_sqlite.dart';
 
 /// Banco SQLite central do WorkHoly.
 ///
@@ -20,8 +21,12 @@ class WorkHolyBanco {
 
   static final WorkHolyBanco instancia = WorkHolyBanco._();
 
-  static const _versao = 3;
+  static const _versao = 4;
   static const _chaveMigracaoLegada = '_migracao_shared_preferences_v1';
+
+  /// Identifica a conta que possui os dados atualmente armazenados neste
+  /// aparelho. Nunca é enviado para a nuvem.
+  static const chaveUsuarioSincronizado = '_workholy_usuario_sincronizado_v1';
 
   static const _tabelaConfiguracoes = 'configuracoes';
   static const _tabelaTreinos = 'treinos';
@@ -32,6 +37,7 @@ class WorkHolyBanco {
   static const _tabelaAvaliacoesFisicas = 'avaliacoes_fisicas';
   static const _tabelaAlunos = 'alunos';
   static const _tabelaAnotacoesAlunos = 'anotacoes_alunos';
+  static const _tabelaRecordesPessoais = 'recordes_pessoais';
 
   static const _chaveTreinos = 'workholy_treinos_v1';
   static const _chaveExercicios = 'workholy_exercicios_v1';
@@ -145,6 +151,8 @@ class WorkHolyBanco {
         );
         await _criarTabelasDePerfil(db);
         await _criarTabelasDeAlunos(db);
+        await _criarTabelaRecordesPessoais(db);
+        await _criarControleAlteracoes(db);
       },
       onUpgrade: (db, versaoAntiga, versaoNova) async {
         if (versaoAntiga < 2) {
@@ -153,6 +161,10 @@ class WorkHolyBanco {
         if (versaoAntiga < 3) {
           await _criarTabelasDeAlunos(db);
         }
+        if (versaoAntiga < 4) {
+          await _criarTabelaRecordesPessoais(db);
+          await _criarControleAlteracoes(db);
+        }
       },
     );
 
@@ -160,6 +172,21 @@ class WorkHolyBanco {
     _db = db;
     return db;
   }
+
+  Future<void> _criarControleAlteracoes(DatabaseExecutor db) =>
+      ControleAlteracoesSqlite.criar(db, [
+        _tabelaConfiguracoes,
+        _tabelaTreinos,
+        _tabelaExercicios,
+        _tabelaItensTreino,
+        _tabelaSessoesTreino,
+        _tabelaMetasPessoais,
+        _tabelaAvaliacoesFisicas,
+        _tabelaRecordesPessoais,
+      ]);
+
+  Future<int> versaoAlteracoes() async =>
+      ControleAlteracoesSqlite.ler(await database);
 
   Future<void> _criarTabelasDePerfil(DatabaseExecutor executor) async {
     await executor.execute('''
@@ -214,6 +241,31 @@ class WorkHolyBanco {
       'CREATE INDEX IF NOT EXISTS idx_anotacoes_aluno_data '
       'ON $_tabelaAnotacoesAlunos(aluno_id, criada_ms DESC)',
     );
+  }
+
+  Future<void> _criarTabelaRecordesPessoais(DatabaseExecutor executor) async {
+    await executor.execute('''
+      CREATE TABLE IF NOT EXISTS $_tabelaRecordesPessoais (
+        id TEXT PRIMARY KEY NOT NULL,
+        exercicio_id TEXT NOT NULL,
+        nome_exercicio TEXT NOT NULL,
+        tipo TEXT NOT NULL,
+        valor REAL NOT NULL,
+        unidade TEXT NOT NULL,
+        data_ms INTEGER NOT NULL,
+        origem TEXT NOT NULL,
+        sessao_id TEXT,
+        observacao TEXT NOT NULL DEFAULT ''
+      )
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_recordes_exercicio_data
+      ON $_tabelaRecordesPessoais (exercicio_id, data_ms DESC)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_recordes_sessao
+      ON $_tabelaRecordesPessoais (sessao_id)
+    ''');
   }
 
   Future<void> _migrarSharedPreferences(Database db) async {
@@ -353,6 +405,10 @@ class WorkHolyBanco {
 
   Future<DadosTreinoBanco> carregarDadosTreino() async {
     final db = await database;
+    return _carregarDadosTreino(db);
+  }
+
+  Future<DadosTreinoBanco> _carregarDadosTreino(DatabaseExecutor db) async {
     final resultados = await Future.wait([
       db.query(_tabelaTreinos, orderBy: 'ordem ASC'),
       db.query(_tabelaExercicios, orderBy: 'ordem ASC'),
@@ -410,6 +466,54 @@ class WorkHolyBanco {
       await _substituirExercicios(txn, exercicios);
       await _substituirItensTreino(txn, itensTreino);
       await _substituirSessoesTreino(txn, sessoesTreino);
+    });
+  }
+
+  /// Adiciona exercícios do catálogo sem substituir os registros existentes.
+  Future<List<Map<String, dynamic>>> adicionarExerciciosDoCatalogo(
+    List<Map<String, dynamic>> candidatos,
+  ) async {
+    final db = await database;
+    return db.transaction((txn) async {
+      final registros = await txn.query(
+        _tabelaExercicios,
+        columns: ['dados_json'],
+      );
+      final existentes = _decodificarRegistros(registros);
+      final idsCatalogo = <String>{};
+      for (final exercicio in existentes) {
+        final id = exercicio['catalogoId'];
+        if (id == null) continue;
+        if (id is! String || id.trim().isEmpty) {
+          throw const FormatException('Identificador de catálogo inválido.');
+        }
+        idsCatalogo.add(id);
+      }
+      final ordemResult = await txn.rawQuery(
+        'SELECT MAX(ordem) AS maior FROM $_tabelaExercicios',
+      );
+      var ordem = ((ordemResult.single['maior'] as int?) ?? -1) + 1;
+      final adicionados = <Map<String, dynamic>>[];
+      final lote = txn.batch();
+      for (final candidato in candidatos) {
+        final catalogoId = candidato['catalogoId'];
+        if (catalogoId is! String || catalogoId.trim().isEmpty) {
+          throw const FormatException(
+            'Exercício do catálogo sem identificador.',
+          );
+        }
+        if (!idsCatalogo.add(catalogoId)) continue;
+        lote.insert(_tabelaExercicios, {
+          'id': _idObrigatorio(candidato, _tabelaExercicios),
+          'nome': candidato['nome']?.toString() ?? 'Exercício sem nome',
+          'grupo': candidato['grupo']?.toString() ?? 'Outros',
+          'ordem': ordem++,
+          'dados_json': jsonEncode(candidato),
+        });
+        adicionados.add(candidato);
+      }
+      await lote.commit(noResult: true);
+      return adicionados;
     });
   }
 
@@ -696,6 +800,383 @@ class WorkHolyBanco {
       [inicio.millisecondsSinceEpoch, fim.millisecondsSinceEpoch],
     );
     return (resultado.first['total'] as num?)?.toInt() ?? 0;
+  }
+
+  /// Gera uma cópia dos dados pessoais do usuário para o backup sincronizado.
+  /// A biblioteca pública de exercícios não é colocada aqui; somente exercícios
+  /// cadastrados pela própria pessoa fazem parte desta coleção.
+  Future<Map<String, dynamic>> exportarDadosDoUsuario() async {
+    return (await exportarDadosDoUsuarioComVersao()).dados;
+  }
+
+  /// A versão e os dados são lidos na mesma transação deste banco.
+  Future<SnapshotLocal<Map<String, dynamic>>>
+  exportarDadosDoUsuarioComVersao() async {
+    final db = await database;
+    return db.transaction((txn) async {
+      final versao = await ControleAlteracoesSqlite.ler(txn);
+      final dadosTreino = await _carregarDadosTreino(txn);
+      final configuracoesSalvas = await txn.query(_tabelaConfiguracoes);
+      final metas = await txn.query(
+        _tabelaMetasPessoais,
+        orderBy: 'prazo_ms ASC, criada_ms DESC',
+      );
+      final avaliacoes = await txn.query(
+        _tabelaAvaliacoesFisicas,
+        orderBy: 'data_ms DESC',
+      );
+      final recordes = await txn.query(
+        _tabelaRecordesPessoais,
+        orderBy: 'data_ms DESC',
+      );
+
+      final configuracoes = <Map<String, dynamic>>[];
+      for (final registro in configuracoesSalvas) {
+        final chave = registro['chave']?.toString() ?? '';
+        if (!_configuracaoSincronizavel(chave)) continue;
+        configuracoes.add(Map<String, dynamic>.from(registro));
+      }
+
+      return SnapshotLocal(
+        versao: versao,
+        dados: {
+          'configuracoes': configuracoes,
+          'treinos': dadosTreino.treinos,
+          'exercicios': dadosTreino.exercicios,
+          'itensTreino': dadosTreino.itensTreino,
+          'sessoesTreino': dadosTreino.sessoesTreino,
+          'metas': metas
+              .map(
+                (item) => Map<String, dynamic>.from(
+                  MetaPessoal.fromRegistro(item).paraRegistro(),
+                ),
+              )
+              .toList(),
+          'avaliacoes': avaliacoes
+              .map(
+                (item) => Map<String, dynamic>.from(
+                  AvaliacaoFisica.fromRegistro(item).paraRegistro(),
+                ),
+              )
+              .toList(),
+          'recordesPessoais': recordes
+              .map((item) => Map<String, dynamic>.from(item))
+              .toList(),
+        },
+      );
+    });
+  }
+
+  /// Substitui o cache local por uma cópia já validada recebida da conta.
+  Future<void> importarDadosDoUsuario(Map<String, dynamic> dados) async {
+    final treinos = _listaDeMapas(dados['treinos']);
+    final exercicios = _listaDeMapas(dados['exercicios']);
+    final itensTreino = _listaDeMapas(dados['itensTreino']);
+    final sessoesTreino = _listaDeMapas(dados['sessoesTreino']);
+    final metas = _listaDeMapas(dados['metas']);
+    final avaliacoes = _listaDeMapas(dados['avaliacoes']);
+    final recordes = _listaDeMapas(dados['recordesPessoais']);
+    final configuracoes = _listaDeMapas(dados['configuracoes']);
+    final db = await database;
+
+    await db.transaction((txn) async {
+      await txn.delete(_tabelaTreinos);
+      await txn.delete(_tabelaExercicios);
+      await txn.delete(_tabelaItensTreino);
+      await txn.delete(_tabelaSessoesTreino);
+      await txn.delete(_tabelaMetasPessoais);
+      await txn.delete(_tabelaAvaliacoesFisicas);
+      await txn.delete(_tabelaRecordesPessoais);
+      await txn.delete(
+        _tabelaConfiguracoes,
+        where: 'chave NOT IN (?, ?)',
+        whereArgs: [_chaveMigracaoLegada, chaveUsuarioSincronizado],
+      );
+
+      await _substituirTreinos(txn, treinos);
+      await _substituirExercicios(txn, exercicios);
+      await _substituirItensTreino(txn, itensTreino);
+      await _substituirSessoesTreino(txn, sessoesTreino);
+
+      for (final meta in metas) {
+        await txn.insert(
+          _tabelaMetasPessoais,
+          Map<String, Object?>.from(meta),
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+      for (final avaliacao in avaliacoes) {
+        await txn.insert(
+          _tabelaAvaliacoesFisicas,
+          Map<String, Object?>.from(avaliacao),
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+      for (final recorde in recordes) {
+        await txn.insert(
+          _tabelaRecordesPessoais,
+          Map<String, Object?>.from(recorde),
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+
+      for (final configuracao in configuracoes) {
+        final chave = configuracao['chave']?.toString() ?? '';
+        final tipo = configuracao['tipo']?.toString() ?? '';
+        final valor = configuracao['valor']?.toString() ?? '';
+        if (!_configuracaoSincronizavel(chave)) continue;
+        final valorTipado = switch (tipo) {
+          'texto' => valor,
+          'inteiro' => int.tryParse(valor),
+          'booleano' => valor == 'true',
+          _ => null,
+        };
+        if (valorTipado != null) {
+          await _salvarConfiguracao(txn, chave, valorTipado);
+        }
+      }
+    });
+  }
+
+  /// Restaura os dois bancos somente se ambos ainda têm as versões informadas.
+  ///
+  /// Quem chama deve preservar a versão local antes de solicitar a substituição.
+  Future<({int principal, int corridas})> restaurarDadosComCorridas({
+    required Map<String, dynamic> dados,
+    required List<Map<String, dynamic>> corridas,
+    required String caminhoBancoCorridas,
+    required int versaoPrincipalEsperada,
+    required int versaoCorridasEsperada,
+  }) async {
+    final treinos = _listaDeMapasObrigatoria(dados, 'treinos');
+    final exercicios = _listaDeMapasObrigatoria(dados, 'exercicios');
+    final itensTreino = _listaDeMapasObrigatoria(dados, 'itensTreino');
+    final sessoesTreino = _listaDeMapasObrigatoria(dados, 'sessoesTreino');
+    final metas = _listaDeMapasObrigatoria(dados, 'metas');
+    final avaliacoes = _listaDeMapasObrigatoria(dados, 'avaliacoes');
+    final recordes = _listaDeMapasObrigatoria(dados, 'recordesPessoais');
+    final configuracoes = _listaDeMapasObrigatoria(dados, 'configuracoes');
+    final valoresConfiguracoes = <String, Object>{};
+    for (final configuracao in configuracoes) {
+      final chave = configuracao['chave'];
+      final tipo = configuracao['tipo'];
+      final valor = configuracao['valor'];
+      if (chave is! String ||
+          !_configuracaoSincronizavel(chave) ||
+          valor is! String ||
+          valoresConfiguracoes.containsKey(chave)) {
+        throw const FormatException('Configuração inválida no backup.');
+      }
+      final Object? tipado;
+      if (tipo == 'texto') {
+        tipado = valor;
+      } else if (tipo == 'inteiro') {
+        tipado = int.tryParse(valor);
+      } else if (tipo == 'booleano' && (valor == 'true' || valor == 'false')) {
+        tipado = valor == 'true';
+      } else {
+        tipado = null;
+      }
+      if (tipado == null) {
+        throw const FormatException(
+          'Valor de configuração inválido no backup.',
+        );
+      }
+      valoresConfiguracoes[chave] = tipado;
+    }
+    const colunasCorrida = {
+      'id',
+      'inicio_ms',
+      'fim_ms',
+      'duracao_segundos',
+      'distancia_metros',
+      'estado',
+      'rota_json',
+      'calorias_estimadas',
+      'peso_kg',
+      'workfit_plano_id',
+      'rpe',
+    };
+    for (final corrida in corridas) {
+      if (corrida.keys.toSet().difference(colunasCorrida).isNotEmpty ||
+          corrida['id'] is! String ||
+          (corrida['id'] as String).trim().isEmpty ||
+          corrida['inicio_ms'] is! int ||
+          corrida['duracao_segundos'] is! int ||
+          corrida['distancia_metros'] is! num ||
+          corrida['estado'] is! String ||
+          !{
+            'em_andamento',
+            'pausada',
+            'finalizada',
+          }.contains(corrida['estado']) ||
+          corrida['rota_json'] is! String ||
+          corrida['calorias_estimadas'] is! num ||
+          (corrida['fim_ms'] != null && corrida['fim_ms'] is! int) ||
+          (corrida['peso_kg'] != null && corrida['peso_kg'] is! num) ||
+          (corrida['workfit_plano_id'] != null &&
+              corrida['workfit_plano_id'] is! String) ||
+          (corrida['rpe'] != null && corrida['rpe'] is! int)) {
+        throw const FormatException('Corrida inválida no backup.');
+      }
+      final rota = jsonDecode(corrida['rota_json'] as String);
+      if (rota is! List ||
+          rota.any(
+            (ponto) =>
+                ponto is! Map || ponto['lat'] is! num || ponto['lon'] is! num,
+          )) {
+        throw const FormatException('Rota inválida no backup.');
+      }
+    }
+
+    final db = await database;
+    if (p.normalize(db.path) == p.normalize(caminhoBancoCorridas)) {
+      throw ArgumentError(
+        'Os bancos principal e de corridas devem ser distintos.',
+      );
+    }
+    if (p.normalize(p.dirname(db.path)) !=
+        p.normalize(p.dirname(caminhoBancoCorridas))) {
+      throw ArgumentError('Os bancos devem estar no mesmo diretório.');
+    }
+    await db.execute('ATTACH DATABASE ? AS backup_corridas', [
+      caminhoBancoCorridas,
+    ]);
+    try {
+      for (final nome in ['main', 'backup_corridas']) {
+        final modo = await db.rawQuery('PRAGMA $nome.journal_mode');
+        final sincronia = await db.rawQuery('PRAGMA $nome.synchronous');
+        final journal = modo.single.values.single.toString().toLowerCase();
+        final sync = sincronia.single.values.single;
+        if (!{'delete', 'truncate', 'persist'}.contains(journal) ||
+            sync is! int ||
+            sync < 2) {
+          throw StateError(
+            'Restauração indisponível: o banco não oferece transação segura entre arquivos.',
+          );
+        }
+      }
+      return await db.transaction((txn) async {
+        final principal = await ControleAlteracoesSqlite.ler(txn);
+        final linhas = await txn.rawQuery(
+          'SELECT versao FROM backup_corridas.workholy_controle_alteracoes WHERE id = 1',
+        );
+        if (linhas.length != 1 || linhas.single['versao'] is! int) {
+          throw StateError('Controle de alterações das corridas inválido.');
+        }
+        if (principal != versaoPrincipalEsperada ||
+            linhas.single['versao'] != versaoCorridasEsperada) {
+          throw StateError(
+            'Os dados locais mudaram; tente a restauração novamente.',
+          );
+        }
+        final abertas = await txn.rawQuery(
+          "SELECT id FROM backup_corridas.corridas "
+          "WHERE estado IN ('em_andamento', 'pausada') LIMIT 1",
+        );
+        if (abertas.isNotEmpty) {
+          throw StateError(
+            'Finalize a corrida aberta antes de restaurar o backup.',
+          );
+        }
+
+        await _substituirTreinos(txn, treinos);
+        await _substituirExercicios(txn, exercicios);
+        await _substituirItensTreino(txn, itensTreino);
+        await _substituirSessoesTreino(txn, sessoesTreino);
+        for (final entrada in [
+          (_tabelaMetasPessoais, metas),
+          (_tabelaAvaliacoesFisicas, avaliacoes),
+          (_tabelaRecordesPessoais, recordes),
+        ]) {
+          await txn.delete(entrada.$1);
+          for (final registro in entrada.$2) {
+            await txn.insert(entrada.$1, Map<String, Object?>.from(registro));
+          }
+        }
+        final antigas = await txn.query(
+          _tabelaConfiguracoes,
+          columns: ['chave'],
+        );
+        for (final registro in antigas) {
+          final chave = registro['chave'];
+          if (chave is String && _configuracaoSincronizavel(chave)) {
+            await txn.delete(
+              _tabelaConfiguracoes,
+              where: 'chave = ?',
+              whereArgs: [chave],
+            );
+          }
+        }
+        for (final entrada in valoresConfiguracoes.entries) {
+          await _salvarConfiguracao(txn, entrada.key, entrada.value);
+        }
+        await txn.delete('backup_corridas.corridas');
+        for (final corrida in corridas) {
+          await txn.insert(
+            'backup_corridas.corridas',
+            Map<String, Object?>.from(corrida),
+          );
+        }
+        final versaoPrincipal = await ControleAlteracoesSqlite.ler(txn);
+        final versaoCorridas = await txn.rawQuery(
+          'SELECT versao FROM backup_corridas.workholy_controle_alteracoes WHERE id = 1',
+        );
+        return (
+          principal: versaoPrincipal,
+          corridas: versaoCorridas.single['versao']! as int,
+        );
+      });
+    } finally {
+      await db.execute('DETACH DATABASE backup_corridas');
+    }
+  }
+
+  List<Map<String, dynamic>> _listaDeMapasObrigatoria(
+    Map<String, dynamic> dados,
+    String chave,
+  ) {
+    final valor = dados[chave];
+    if (valor is! List || valor.any((item) => item is! Map)) {
+      throw FormatException('Lista inválida no backup: $chave.');
+    }
+    return valor.map((item) => Map<String, dynamic>.from(item as Map)).toList();
+  }
+
+  /// Remove o cache da conta anterior antes que outro usuário entre no mesmo
+  /// aparelho. O backup da conta anterior permanece na nuvem.
+  Future<void> limparDadosDoUsuario() async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete(_tabelaTreinos);
+      await txn.delete(_tabelaExercicios);
+      await txn.delete(_tabelaItensTreino);
+      await txn.delete(_tabelaSessoesTreino);
+      await txn.delete(_tabelaMetasPessoais);
+      await txn.delete(_tabelaAvaliacoesFisicas);
+      await txn.delete(_tabelaRecordesPessoais);
+      await txn.delete(
+        _tabelaConfiguracoes,
+        where: 'chave != ?',
+        whereArgs: [_chaveMigracaoLegada],
+      );
+    });
+  }
+
+  bool _configuracaoSincronizavel(String chave) {
+    return chave.isNotEmpty &&
+        chave != _chaveMigracaoLegada &&
+        chave != chaveUsuarioSincronizado &&
+        chave != '_workholy_backup_ativado_v1' &&
+        !chave.startsWith('workholy_assinatura_');
+  }
+
+  List<Map<String, dynamic>> _listaDeMapas(Object? valor) {
+    if (valor is! List) return const [];
+    return valor
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
   }
 }
 

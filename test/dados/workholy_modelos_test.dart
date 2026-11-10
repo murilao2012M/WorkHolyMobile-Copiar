@@ -1,7 +1,90 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:workholy_mobile/dados/workholy_modelos.dart';
+import 'package:workholy_mobile/workfit/workfit_ciclo.dart';
 
 void main() {
+  test('preserva metadados do WorkFit e recursos locais no armazenamento', () {
+    final ciclo = WorkFitCiclo(
+      id: 'ciclo-1',
+      inicio: DateTime(2026, 11, 7),
+      diasPorSemana: 4,
+      modalidade: 'musculacao',
+    );
+    final treino = Treino(
+      id: 'treino-workfit',
+      nome: 'Treino WorkFit',
+      objetivo: 'Força',
+      grupo: 'A',
+      favorito: true,
+      diasSemana: const [1, 3, 5],
+      anotacoes: 'Manter a técnica.',
+      workfitCiclo: ciclo,
+    );
+    final exercicio = Exercicio(
+      id: 'exercicio-1',
+      nome: 'Agachamento',
+      grupo: 'Pernas',
+      series: 3,
+      repeticoes: 8,
+      catalogoId: 'squat',
+    );
+    final item = ItemTreino(
+      id: 'item-1',
+      treinoId: treino.id,
+      exercicioId: exercicio.id,
+      series: 3,
+      repeticoes: 8,
+      cargaKg: 40,
+      descansoSegundos: 120,
+      metaCargaKg: 45,
+      progressaoAtiva: false,
+      workfitUltimaSessaoAjustada: 'sessao-anterior',
+      workfitCicloRecuperado: ciclo.id,
+    );
+    final sessao = SessaoTreino(
+      id: 'sessao-1',
+      treinoId: treino.id,
+      nomeTreino: treino.nome,
+      inicio: DateTime(2026, 11, 7, 9),
+      fim: DateTime(2026, 11, 7, 10),
+      workfitPlanoId: ciclo.id,
+      rpe: 8,
+      rir: 2,
+      series: [
+        SerieExecutada(
+          id: 'serie-1',
+          exercicioId: exercicio.id,
+          nomeExercicio: exercicio.nome,
+          numeroSerie: 1,
+          repeticoesPlanejadas: 8,
+          repeticoesRealizadas: 8,
+          cargaKg: 40,
+          concluida: true,
+          descansoSegundos: 120,
+          catalogoId: exercicio.catalogoId,
+        ),
+      ],
+    );
+
+    final treinoLido = Treino.fromJson(treino.toJson());
+    final exercicioLido = Exercicio.fromJson(exercicio.toJson());
+    final itemLido = ItemTreino.fromJson(item.toJson());
+    final sessaoLida = SessaoTreino.fromJson(sessao.toJson());
+
+    expect(treinoLido.workfitCiclo?.id, ciclo.id);
+    expect(treinoLido.grupo, 'A');
+    expect(treinoLido.favorito, isTrue);
+    expect(exercicioLido.catalogoId, 'squat');
+    expect(itemLido.progressaoAtiva, isFalse);
+    expect(itemLido.metaCargaKg, 45);
+    expect(itemLido.workfitUltimaSessaoAjustada, 'sessao-anterior');
+    expect(itemLido.workfitCicloRecuperado, ciclo.id);
+    expect(sessaoLida.workfitPlanoId, ciclo.id);
+    expect(sessaoLida.rpe, 8);
+    expect(sessaoLida.rir, 2);
+    expect(sessaoLida.series.single.catalogoId, 'squat');
+  });
+
   test('Treino preserva favoritos, divisão, agenda e anotações', () {
     final treino = Treino(
       id: 'treino-a',
